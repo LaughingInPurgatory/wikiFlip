@@ -54,13 +54,17 @@ $types = [
     'webp' => 'image/webp',
     'svg' => 'image/svg+xml',
     'pdf' => 'application/pdf',
+    'css' => 'text/css; charset=utf-8',
     'txt' => 'text/plain; charset=utf-8',
 ];
 $mime = $types[$ext] ?? 'application/octet-stream';
 
+// CSS overrides should revalidate quickly after admin edits
+$cache = $ext === 'css' ? 'public, max-age=60, must-revalidate' : 'public, max-age=3600';
+
 header('Content-Type: ' . $mime);
 header('Content-Length: ' . (string) filesize($path));
-header('Cache-Control: public, max-age=3600');
+header('Cache-Control: ' . $cache);
 header('X-Content-Type-Options: nosniff');
 readfile($path);
 exit;

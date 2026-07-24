@@ -108,6 +108,9 @@ if (!function_exists('render_nav_tree')) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= e($pageTitle) ?><?= $pageTitle !== $siteTitle ? ' · ' . e($siteTitle) : '' ?></title>
     <link rel="stylesheet" href="<?= e(url('assets/css/style.css')) ?>?v=<?= (int) @filemtime(WIKIFLIP_ROOT . '/assets/css/style.css') ?>">
+    <?php if (SiteSettings::hasCustomCss()): ?>
+    <link rel="stylesheet" href="<?= e(SiteSettings::customCssUrl()) ?>">
+    <?php endif; ?>
     <?php if (!empty($loadEditor)): ?>
     <link rel="stylesheet" href="<?= e(url('assets/vendor/toastui/toastui-editor.min.css')) ?>">
     <link rel="stylesheet" href="<?= e(url('assets/vendor/toastui/toastui-editor-dark.min.css')) ?>">

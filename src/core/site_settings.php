@@ -9,11 +9,16 @@ namespace WikiApp\Core;
  *
  *   pages/.site/settings.json   { "site_title": "My Wiki" }
  *   pages/.site/logo.ext        custom logo (png/jpg/webp/gif/svg)
+ *   pages/.site/custom.css      optional CSS overrides (loaded after default theme)
  */
 final class SiteSettings
 {
     private const DIR_NAME = '.site';
     private const SETTINGS_FILE = 'settings.json';
+    private const CUSTOM_CSS_FILE = 'custom.css';
+
+    /** Max custom CSS size (bytes) to keep uploads/posts reasonable. */
+    private const CUSTOM_CSS_MAX_BYTES = 512_000;
 
     /** @var array{site_title: string, logo_file: string|null}|null */
     private static ?array $cache = null;
@@ -185,6 +190,111 @@ final class SiteSettings
             'site_title' => self::get()['site_title'],
             'logo_file' => null,
         ]);
+    }
+
+    /**
+     * Absolute path to the bundled default theme stylesheet.
+     */
+    public static function defaultCssPath(): string
+    {
+        return WIKIFLIP_ROOT . '/assets/css/style.css';
+    }
+
+    /**
+     * Absolute path to the optional custom CSS override file.
+     */
+    public static function customCssPath(): string
+    {
+        return self::dir() . '/' . self::CUSTOM_CSS_FILE;
+    }
+
+    public static function hasCustomCss(): bool
+    {
+        $path = self::customCssPath();
+        return is_file($path) && filesize($path) !== false;
+    }
+
+    /**
+     * Public URL for the custom CSS (only meaningful when hasCustomCss() is true).
+     */
+    public static function customCssUrl(): string
+    {
+        $mtime = self::hasCustomCss() ? (int) @filemtime(self::customCssPath()) : time();
+        return url('media.php?slug=_site&file=' . rawurlencode(self::CUSTOM_CSS_FILE) . '&v=' . $mtime);
+    }
+
+    /**
+     * Default theme CSS text (for the admin editor reference).
+     */
+    public static function getDefaultCss(): string
+    {
+        $path = self::defaultCssPath();
+        if (!is_file($path)) {
+            return "/* Default stylesheet not found. */\n";
+        }
+        $raw = file_get_contents($path);
+        return is_string($raw) ? $raw : "/* Default stylesheet unreadable. */\n";
+    }
+
+    /**
+     * CSS shown in the admin editor: saved custom CSS if present, otherwise the default theme.
+     */
+    public static function getCssForEditor(): string
+    {
+        if (self::hasCustomCss()) {
+            $raw = file_get_contents(self::customCssPath());
+            if (is_string($raw)) {
+                return $raw;
+            }
+        }
+        return self::getDefaultCss();
+    }
+
+    /**
+     * Persist custom CSS. Empty string (or content identical to the default theme)
+     * clears the override so the site uses only the bundled stylesheet.
+     */
+    public static function saveCustomCss(string $css): bool
+    {
+        // Normalize newlines; strip null bytes
+        $css = str_replace("\0", '', $css);
+        $css = str_replace(["\r\n", "\r"], "\n", $css);
+
+        if (strlen($css) > self::CUSTOM_CSS_MAX_BYTES) {
+            return false;
+        }
+
+        // Empty / whitespace-only → remove override
+        if (trim($css) === '') {
+            return self::clearCustomCss();
+        }
+
+        // Unchanged default reference text — no need for a second full stylesheet
+        $default = str_replace(["\r\n", "\r"], "\n", self::getDefaultCss());
+        if ($css === $default || trim($css) === trim($default)) {
+            return self::clearCustomCss();
+        }
+
+        $dir = self::dir();
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+
+        $path = self::customCssPath();
+        if (file_put_contents($path, $css, LOCK_EX) === false) {
+            return false;
+        }
+        @chmod($path, 0644);
+        return true;
+    }
+
+    public static function clearCustomCss(): bool
+    {
+        $path = self::customCssPath();
+        if (is_file($path)) {
+            return @unlink($path);
+        }
+        return true;
     }
 
     /**

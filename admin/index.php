@@ -50,9 +50,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'reorder') {
         $slug = DatabaseManager::sanitizeSlug((string) ($_POST['slug'] ?? ''));
         $dir = (string) ($_POST['direction'] ?? '');
+        $ok = false;
         if ($slug !== '' && ($dir === 'up' || $dir === 'down')) {
-            DatabaseManager::reorderSibling($slug, $dir);
+            $ok = DatabaseManager::reorderSibling($slug, $dir);
         }
+
+        // AJAX reorder keeps the tree open / scroll position; full POST still redirects.
+        $wantsJson = (string) ($_POST['ajax'] ?? '') === '1'
+            || str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+            || strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+        if ($wantsJson) {
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: no-store');
+            echo json_encode([
+                'ok' => $ok,
+                'slug' => $slug,
+                'direction' => $dir,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            exit;
+        }
+
         admin_redirect('pages');
     }
 
@@ -386,10 +403,35 @@ require __DIR__ . '/../src/includes/header.php';
   var tree = document.getElementById('adminPageTree');
   if (!tree) return;
 
-  function descendantsOf(parentSlug) {
+  var busy = false;
+
+  function rowBySlug(slug) {
+    return tree.querySelector('tr.admin-tree-row[data-slug="' + CSS.escape(slug) + '"]');
+  }
+
+  function siblingRows(parentSlug) {
+    // Top-level rows use data-parent=""
     return Array.prototype.slice.call(
       tree.querySelectorAll('tr.admin-tree-row[data-parent="' + CSS.escape(parentSlug) + '"]')
     );
+  }
+
+  function descendantsOf(parentSlug) {
+    return siblingRows(parentSlug);
+  }
+
+  /** Row + all nested descendant rows, in document (tree) order. */
+  function collectSubtree(slug) {
+    var row = rowBySlug(slug);
+    if (!row) return [];
+    var out = [row];
+    descendantsOf(slug).forEach(function (child) {
+      var childSlug = child.getAttribute('data-slug');
+      if (childSlug) {
+        out = out.concat(collectSubtree(childSlug));
+      }
+    });
+    return out;
   }
 
   function setExpanded(parentSlug, expanded) {
@@ -411,14 +453,145 @@ require __DIR__ . '/../src/includes/header.php';
     });
   }
 
+  function moveButtons(row) {
+    return {
+      up: row.querySelector('button.btn-icon[title="Move up"]'),
+      down: row.querySelector('button.btn-icon[title="Move down"]')
+    };
+  }
+
+  function refreshSiblingButtons(parentSlug) {
+    var sibs = siblingRows(parentSlug);
+    sibs.forEach(function (row, i) {
+      var btns = moveButtons(row);
+      if (btns.up) btns.up.disabled = i === 0;
+      if (btns.down) btns.down.disabled = i === sibs.length - 1;
+    });
+  }
+
+  /** Insert a contiguous block of rows before a reference row. */
+  function insertBlockBefore(block, reference) {
+    if (!reference || !block.length) return;
+    var parent = reference.parentNode;
+    block.forEach(function (r) {
+      parent.insertBefore(r, reference);
+    });
+  }
+
+  /** Insert a contiguous block of rows after the last node of another block. */
+  function insertBlockAfter(block, afterNode) {
+    if (!afterNode || !block.length) return;
+    var parent = afterNode.parentNode;
+    var ref = afterNode.nextSibling;
+    block.forEach(function (r) {
+      parent.insertBefore(r, ref);
+    });
+  }
+
+  /**
+   * Move slug's subtree up/down among its siblings in the live table
+   * (expand/collapse state is preserved because we don't reload).
+   */
+  function moveInDom(slug, direction) {
+    var row = rowBySlug(slug);
+    if (!row) return false;
+    var parentSlug = row.getAttribute('data-parent') || '';
+    var sibs = siblingRows(parentSlug);
+    var idx = -1;
+    for (var i = 0; i < sibs.length; i++) {
+      if (sibs[i].getAttribute('data-slug') === slug) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) return false;
+
+    var block = collectSubtree(slug);
+    if (direction === 'up') {
+      if (idx <= 0) return false;
+      var prevSlug = sibs[idx - 1].getAttribute('data-slug');
+      var prevRow = rowBySlug(prevSlug);
+      if (!prevRow) return false;
+      insertBlockBefore(block, prevRow);
+    } else if (direction === 'down') {
+      if (idx >= sibs.length - 1) return false;
+      var nextSlug = sibs[idx + 1].getAttribute('data-slug');
+      var nextBlock = collectSubtree(nextSlug);
+      if (!nextBlock.length) return false;
+      insertBlockAfter(block, nextBlock[nextBlock.length - 1]);
+    } else {
+      return false;
+    }
+
+    refreshSiblingButtons(parentSlug);
+    return true;
+  }
+
   tree.addEventListener('click', function (e) {
-    var btn = e.target.closest('.tree-toggle');
-    if (!btn || !tree.contains(btn)) return;
+    var toggle = e.target.closest('.tree-toggle');
+    if (toggle && tree.contains(toggle)) {
+      e.preventDefault();
+      var tSlug = toggle.getAttribute('data-toggle-children');
+      if (!tSlug) return;
+      var open = toggle.getAttribute('aria-expanded') === 'true';
+      setExpanded(tSlug, !open);
+      return;
+    }
+  });
+
+  // In-place AJAX reorder — no full page reset of expand/scroll.
+  tree.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form || form.tagName !== 'FORM' || !tree.contains(form)) return;
+    var actionInput = form.querySelector('input[name="action"]');
+    if (!actionInput || actionInput.value !== 'reorder') return;
+
     e.preventDefault();
-    var slug = btn.getAttribute('data-toggle-children');
-    if (!slug) return;
-    var open = btn.getAttribute('aria-expanded') === 'true';
-    setExpanded(slug, !open);
+    if (busy) return;
+
+    var slugInput = form.querySelector('input[name="slug"]');
+    var dirInput = form.querySelector('input[name="direction"]');
+    var slug = slugInput ? slugInput.value : '';
+    var direction = dirInput ? dirInput.value : '';
+    if (!slug || (direction !== 'up' && direction !== 'down')) return;
+
+    var submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn && submitBtn.disabled) return;
+
+    busy = true;
+    tree.classList.add('is-reordering');
+
+    var body = new FormData(form);
+    body.set('ajax', '1');
+
+    fetch(form.action || window.location.href, {
+      method: 'POST',
+      body: body,
+      credentials: 'same-origin',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          // Server refused (already at edge, race, etc.) — leave DOM as-is
+          return;
+        }
+        moveInDom(slug, direction);
+      })
+      .catch(function () {
+        // Fallback: full reload so order still matches disk
+        window.location.reload();
+      })
+      .finally(function () {
+        busy = false;
+        tree.classList.remove('is-reordering');
+      });
   });
 })();
 </script>

@@ -834,6 +834,16 @@ textarea.css-editor:focus {
   vertical-align: middle;
 }
 
+/* While an AJAX reorder is in flight */
+#adminPageTree.is-reordering {
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+#adminPageTree.is-reordering .admin-tree-row {
+  transition: background-color 0.15s ease;
+}
+
 /* ========== Forms ========== */
 
 .form-group {

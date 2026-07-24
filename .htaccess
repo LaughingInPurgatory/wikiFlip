@@ -1,0 +1,16 @@
+# Apache: clean URLs when DocumentRoot is this directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Existing files and directories as-is
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # /admin → admin/
+    RewriteRule ^admin/?$ admin/index.php [L,QSA]
+
+    # /slug → index.php?slug=slug
+    RewriteRule ^([a-z0-9]+(?:-[a-z0-9]+)*)/?$ index.php?slug=$1 [L,QSA]
+</IfModule>

@@ -1,0 +1,984 @@
+/**
+ * WikiFlip theme — glassmorphic deep-indigo
+ *
+ * Drop into wikiFlip as assets/css/style.css (or link from the theme pack).
+ * Shares the same palette as styles-custom.css (indigo glass base).
+ *
+ * @package deep-indigo-glass-themes
+ * @see styles-custom.css for the design source of truth
+ */
+
+:root {
+  --bg1: #0f1021;
+  --bg2: #1a1c3a;
+  --card: rgba(28, 30, 58, 0.6);
+  --panel: rgba(18, 20, 42, 0.75);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #e7e9ff;
+  --muted: #8b8fc7;
+  --accent: #7c8cff;
+  --accent-2: #56d0c9;
+  --hover: rgba(124, 140, 255, 0.12);
+  --danger: #ff6b8a;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "SFMono-Regular", "Courier New", monospace;
+  --sidebar-w: 260px;
+  --inset: 12px;
+  --radius: 18px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--text);
+  font-family: var(--font);
+  line-height: 1.65;
+  background:
+    radial-gradient(1200px 800px at 15% -10%, #2a1f5233 0%, transparent 60%),
+    radial-gradient(1000px 700px at 110% 10%, #14484a33 0%, transparent 55%),
+    linear-gradient(160deg, var(--bg1), var(--bg2));
+  background-attachment: fixed;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
+}
+
+a:hover {
+  color: #fff;
+  text-shadow: 0 0 8px rgba(124, 140, 255, 0.55);
+}
+
+code {
+  background: var(--panel);
+  color: var(--accent-2);
+  padding: 0 5px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* custom scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) var(--panel);
+}
+
+::-webkit-scrollbar-track {
+  background: var(--panel);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 10px;
+}
+
+::selection {
+  background-color: var(--accent);
+  color: var(--bg1);
+}
+
+/* ========== Layout: sidebar + floating main ========== */
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.sidenav {
+  position: fixed;
+  top: var(--inset);
+  left: var(--inset);
+  bottom: var(--inset);
+  width: var(--sidebar-w);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0 12px;
+  overflow: hidden;
+  /* Solid enough glass panel — avoid transparency that paints a “ghost” copy */
+  background-color: rgba(18, 20, 42, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  /* transform only used on small screens (see max-width query) — avoids
+     fixed+transform double-layer glitches on desktop */
+  transform: none;
+  transition: transform 0.2s ease;
+}
+
+@media (max-width: 992px) {
+  .sidenav {
+    transform: translateX(calc(-100% - var(--inset) - 8px));
+  }
+
+  .sidenav.is-open {
+    transform: translateX(0);
+  }
+}
+
+.sidenav-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.sidenav-backdrop.is-open {
+  display: block;
+}
+
+.sidenav .brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 18px 20px 14px;
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.sidenav .brand:hover {
+  text-shadow: none;
+  color: #fff;
+}
+
+.sidenav .brand .brand-logo {
+  display: block;
+  width: 96px;
+  height: auto;
+  max-width: 70%;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.sidenav .brand h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.sidenav-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 10px;
+  list-style: none;
+  margin: 0;
+}
+
+.sidenav-nav a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sidenav-nav a:hover {
+  background-color: var(--hover);
+  box-shadow: inset 0 0 20px rgba(124, 140, 255, 0.18), 0 0 12px rgba(124, 140, 255, 0.12);
+  text-shadow: none;
+  color: #fff;
+}
+
+.sidenav-nav a.is-active {
+  background-color: var(--hover);
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 0 20px rgba(124, 140, 255, 0.14);
+  color: #fff;
+}
+
+.sidenav-nav .nav-section {
+  margin: 12px 12px 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sidenav-nav > .nav-category {
+  margin-bottom: 2px;
+}
+
+/* Collapse nested lists unless this branch contains the current page */
+.sidenav-subnav {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--border);
+  margin-left: 14px;
+  display: none;
+}
+
+.sidenav-nav .is-current > .sidenav-subnav,
+.sidenav-nav .has-active-child > .sidenav-subnav {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.sidenav-subnav a {
+  padding: 7px 12px;
+  font-size: 0.92em;
+  color: var(--muted);
+}
+
+.sidenav-subnav a:hover,
+.sidenav-subnav a.is-active {
+  color: #fff;
+}
+
+.sidenav-nav .nav-category.has-active-child > a,
+.sidenav-nav .nav-category.is-current > a {
+  color: #fff;
+}
+
+.sidenav-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 12px 14px 14px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+}
+
+.sidenav-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text) !important;
+  text-decoration: none !important;
+  box-shadow: 0 0 10px rgba(124, 140, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+
+.sidenav-icon-btn:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+  color: #fff !important;
+  text-shadow: none;
+  box-shadow: 0 0 16px rgba(124, 140, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.sidenav-icon-btn.is-active {
+  background: rgba(124, 140, 255, 0.16);
+  border-color: rgba(124, 140, 255, 0.35);
+  color: var(--accent) !important;
+  box-shadow: 0 0 14px rgba(124, 140, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.sidenav-icon-letter {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.sidenav-icon-plus {
+  font-size: 1.35rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.sidenav-icon-svg {
+  display: block;
+}
+
+.menu-toggle {
+  display: inline-flex;
+  position: fixed;
+  top: calc(var(--inset) + 8px);
+  left: calc(var(--inset) + 8px);
+  z-index: 50;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.menu-toggle:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+
+main.wiki-container {
+  margin: var(--inset) var(--inset) 0;
+  padding: 28px 32px;
+  box-sizing: border-box;
+  min-height: calc(100vh - 24px - 3.5rem);
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Desktop: keep a solid glass rail so nav never “echoes” through content */
+@media (min-width: 993px) {
+  .menu-toggle {
+    display: none;
+  }
+
+  .sidenav-backdrop {
+    display: none !important;
+  }
+
+  .sidenav {
+    transform: none !important;
+    overflow-y: auto;
+  }
+
+  main.wiki-container {
+    margin: var(--inset) var(--inset) 0 calc(var(--sidebar-w) + var(--inset) * 2);
+  }
+
+  .site-footer {
+    margin-left: calc(var(--sidebar-w) + var(--inset) * 2);
+    margin-right: var(--inset);
+  }
+}
+
+/* ========== Cards / panels (inside main, avoid double glass) ========== */
+
+.card,
+.admin-editor,
+.admin-panel,
+.wiki-article {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+/* ========== Typography / article ========== */
+
+.article-header h1 {
+  margin: 0 0 0.25rem;
+  color: var(--text);
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.article-header .meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 1.25rem;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.breadcrumb-sep {
+  opacity: 0.6;
+}
+
+.breadcrumb-current {
+  color: var(--text);
+}
+
+.subpage-list {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.subpage-list h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  color: var(--accent);
+  border: none;
+  padding: 0;
+}
+
+.subpage-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.subpage-list li a {
+  display: block;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.subpage-list li a:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+  box-shadow: 0 0 16px rgba(124, 140, 255, 0.12);
+  text-shadow: none;
+  color: #fff;
+}
+
+.tree-branch {
+  color: var(--muted);
+  margin-right: 0.35rem;
+}
+
+.badge-category {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 140, 255, 0.35);
+  color: var(--accent);
+  background: rgba(124, 140, 255, 0.1);
+  vertical-align: middle;
+}
+
+.badge-category.muted {
+  border-color: var(--border);
+  color: var(--muted);
+  background: transparent;
+  font-weight: 500;
+}
+
+.pages-table tr.is-child td {
+  color: var(--text);
+}
+
+.admin-hint {
+  margin: -0.5rem 0 1.25rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.form-group select {
+  width: 100%;
+  background-color: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font: inherit;
+}
+
+.form-group select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 140, 255, 0.3);
+}
+
+.wiki-article-content h1,
+.wiki-article-content h2,
+.wiki-article-content h3 {
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35rem;
+  margin-top: 1.5rem;
+  font-weight: 600;
+}
+
+.wiki-article-content blockquote {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--accent);
+  background: var(--hover);
+  border-radius: 0 12px 12px 0;
+  color: var(--text);
+}
+
+.wiki-article-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  margin: 1rem 0;
+}
+
+/* Inline PDF embeds */
+.wiki-article-content .pdf-embed,
+.pdf-embed {
+  margin: 1.25rem 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.wiki-article-content .pdf-frame,
+.pdf-frame {
+  display: block;
+  width: 100%;
+  height: min(70vh, 720px);
+  min-height: 420px;
+  border: 0;
+  background: #0a0b16;
+}
+
+.wiki-article-content .pdf-embed-actions,
+.pdf-embed-actions {
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.wiki-article-content .pdf-embed-actions a,
+.pdf-embed-actions a {
+  color: var(--accent);
+}
+
+.wiki-article-content a:hover {
+  text-shadow: 0 0 8px rgba(124, 140, 255, 0.55);
+}
+
+.article-actions {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ========== Admin panel chrome ========== */
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.panel-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.empty-state {
+  color: var(--muted);
+}
+
+/* ========== Forms ========== */
+
+.form-group {
+  margin-bottom: 1.15rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.form-group input[type="text"],
+.form-group input[type="file"],
+.form-group textarea,
+.form-group select {
+  width: 100%;
+  background-color: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font: inherit;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 140, 255, 0.3);
+}
+
+.form-group input[readonly] {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.form-group .hint {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  align-items: center;
+}
+
+/* Toast UI Editor */
+.md-editor-host {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.md-editor-host .toastui-editor-defaultUI {
+  border: none;
+}
+
+.md-editor-host .toastui-editor-defaultUI-toolbar,
+.md-editor-host .toastui-editor-mode-switch {
+  background: rgba(18, 20, 42, 0.95);
+  border-color: var(--border) !important;
+}
+
+.md-editor-host .toastui-editor-ww-container,
+.md-editor-host .toastui-editor-md-container {
+  background: #12142a;
+}
+
+.pdf-toolbar-btn {
+  color: var(--accent) !important;
+  cursor: pointer;
+  border: 1px solid rgba(124, 140, 255, 0.35) !important;
+  border-radius: 6px !important;
+  background: rgba(124, 140, 255, 0.12) !important;
+}
+
+.md-fallback-textarea {
+  width: 100%;
+  min-height: 360px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0 0 12px 12px;
+  background: #12142a;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.md-fallback-textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ========== Buttons (from base theme components) ========== */
+
+button,
+.btn,
+.btn-flat,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  background-color: var(--card);
+  color: var(--text) !important;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none !important;
+  box-shadow: 0 0 10px rgba(124, 140, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+}
+
+button:hover,
+.btn:hover,
+.btn-flat:hover,
+.btn-ghost:hover {
+  background-color: var(--hover);
+  border-color: var(--border-strong);
+  color: #fff !important;
+  box-shadow: 0 0 16px rgba(124, 140, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  text-shadow: none;
+}
+
+button:active,
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn.primary,
+.btn-primary,
+button[type="submit"] {
+  background-color: rgba(124, 140, 255, 0.16);
+  border-color: rgba(124, 140, 255, 0.35);
+  color: var(--accent) !important;
+  font-weight: 600;
+  box-shadow: 0 0 14px rgba(124, 140, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.btn.primary:hover,
+.btn-primary:hover,
+button[type="submit"]:hover {
+  background-color: rgba(124, 140, 255, 0.24);
+  border-color: rgba(124, 140, 255, 0.5);
+  color: #fff !important;
+  box-shadow: 0 0 22px rgba(124, 140, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.btn-flat,
+.btn-ghost {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--muted) !important;
+  box-shadow: none;
+}
+
+.btn-flat:hover,
+.btn-ghost:hover {
+  background-color: var(--hover);
+  color: var(--text) !important;
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.btn:disabled,
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* ========== Tables ========== */
+
+.pages-table,
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: transparent;
+  color: var(--text);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+
+.pages-table th,
+.pages-table td,
+table th,
+table td {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.pages-table th,
+table th {
+  background-color: var(--panel);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pages-table tr:nth-child(even),
+table tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.pages-table tr:hover,
+table tr:hover {
+  background-color: var(--hover);
+}
+
+.pages-table .actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.inline-form {
+  display: inline;
+  margin: 0;
+}
+
+.link-danger {
+  background: none;
+  border: none;
+  color: var(--danger) !important;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  height: auto;
+  box-shadow: none;
+  text-decoration: underline;
+}
+
+.link-danger:hover {
+  color: #ff9aaf !important;
+  background: none;
+  box-shadow: none;
+  border-color: transparent;
+  text-shadow: none;
+}
+
+/* ========== Status banners ========== */
+
+.save-status {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.save-status.is-success {
+  background: rgba(86, 208, 201, 0.12);
+  border: 1px solid rgba(86, 208, 201, 0.35);
+  color: var(--accent-2);
+}
+
+.save-status.is-error {
+  background: rgba(255, 107, 138, 0.12);
+  border: 1px solid rgba(255, 107, 138, 0.35);
+  color: var(--danger);
+}
+
+/* Bottom toast (page saved / save errors) */
+.save-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  z-index: 1000;
+  min-width: min(360px, calc(100vw - 2rem));
+  max-width: min(480px, calc(100vw - 2rem));
+  padding: 0.9rem 1.25rem;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, 120%);
+  opacity: 0;
+  transition: transform 0.28s ease, opacity 0.28s ease;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.save-toast.is-visible {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+
+.save-toast.is-success {
+  background: rgba(18, 20, 42, 0.92);
+  border: 1px solid rgba(86, 208, 201, 0.45);
+  color: var(--accent-2);
+}
+
+.save-toast.is-error {
+  background: rgba(18, 20, 42, 0.92);
+  border: 1px solid rgba(255, 107, 138, 0.45);
+  color: var(--danger);
+}
+
+/* ========== Footer (under main content column) ========== */
+
+.site-footer {
+  margin: 0.75rem var(--inset) var(--inset);
+  padding: 0.75rem 0 0.25rem;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  main.wiki-container {
+    padding: 20px 16px;
+  }
+
+  .pages-table thead {
+    display: none;
+  }
+
+  .pages-table tr {
+    display: block;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.5rem;
+  }
+
+  .pages-table td {
+    display: block;
+    border: none;
+    padding: 0.35rem 0.5rem;
+  }
+}
+
+/* ========== Login ========== */
+.login-panel {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.login-form .form-actions {
+  margin-top: 1.5rem;
+}

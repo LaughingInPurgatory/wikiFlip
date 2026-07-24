@@ -1,0 +1,33 @@
+# WikiFlip — Apache + PHP container
+#
+# Dockhand / Portainer / plain Compose:
+#   docker compose up -d
+#
+# Local build instead of pull:
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up --build
+#
+# Plain docker run:
+#   docker run -d --name wikiflip -p 8080:80 \
+#     -e WIKIFLIP_ADMIN_USER=admin \
+#     -e WIKIFLIP_ADMIN_PASSWORD=password \
+#     -v wiki_pages:/var/www/html/pages \
+#     ghcr.io/laughinginpurgatory/wikiflip:latest
+#
+# Note: avoid ${VAR:-default} syntax — some UIs (including Dockhand) only
+# substitute plain ${VAR} from the stack env form.
+
+services:
+  wiki:
+    image: ghcr.io/laughinginpurgatory/wikiflip:latest
+    container_name: wikiflip
+    ports:
+      - "8080:80"
+    environment:
+      WIKIFLIP_ADMIN_USER: admin
+      WIKIFLIP_ADMIN_PASSWORD: password
+    volumes:
+      - wiki_pages:/var/www/html/pages
+    restart: unless-stopped
+
+volumes:
+  wiki_pages:

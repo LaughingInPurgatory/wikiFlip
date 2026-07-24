@@ -1,0 +1,10 @@
+# Local development — build the Apache container from this directory.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up --build
+
+services:
+  wiki:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wikiflip:local

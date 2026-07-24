@@ -13,7 +13,11 @@ use WikiApp\Core\SiteSettings;
 use function WikiApp\Core\e;
 use function WikiApp\Core\url;
 
-Auth::requireLogin();
+// AJAX reorder/delete should get JSON 401 instead of an HTML login redirect
+$wantsAjaxAuth = (string) ($_POST['ajax'] ?? '') === '1'
+    || str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+    || strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+Auth::requireLogin($wantsAjaxAuth && $_SERVER['REQUEST_METHOD'] === 'POST');
 
 $isAdmin = true;
 $pageTitle = 'Admin';
@@ -168,20 +172,10 @@ function render_admin_tree_child(array $page, array $siblings, int $depth, strin
         <td><code><?= e($slug) ?></code></td>
         <td><?= e($updated) ?></td>
         <td class="actions admin-tree-actions">
-            <form method="post" class="inline-form">
-                <input type="hidden" name="action" value="reorder">
-                <input type="hidden" name="tab" value="pages">
-                <input type="hidden" name="slug" value="<?= e($slug) ?>">
-                <input type="hidden" name="direction" value="up">
-                <button type="submit" class="btn-icon" title="Move up" <?= $canUp ? '' : 'disabled' ?>>↑</button>
-            </form>
-            <form method="post" class="inline-form">
-                <input type="hidden" name="action" value="reorder">
-                <input type="hidden" name="tab" value="pages">
-                <input type="hidden" name="slug" value="<?= e($slug) ?>">
-                <input type="hidden" name="direction" value="down">
-                <button type="submit" class="btn-icon" title="Move down" <?= $canDown ? '' : 'disabled' ?>>↓</button>
-            </form>
+            <button type="button" class="btn-icon reorder-btn" data-direction="up"
+                    title="Move up" aria-label="Move up" <?= $canUp ? '' : 'disabled' ?>>↑</button>
+            <button type="button" class="btn-icon reorder-btn" data-direction="down"
+                    title="Move down" aria-label="Move down" <?= $canDown ? '' : 'disabled' ?>>↓</button>
             <a href="<?= e(url('?slug=' . rawurlencode($slug))) ?>">View</a>
             <a href="<?= e(url('admin/edit.php?slug=' . rawurlencode($slug))) ?>">Edit</a>
             <a href="<?= e(url('admin/edit.php?parent=' . rawurlencode($slug))) ?>">+ Sub</a>
@@ -320,7 +314,8 @@ require __DIR__ . '/../src/includes/header.php';
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="adminPageTree">
+                    <tbody id="adminPageTree"
+                           data-reorder-url="<?= e(url('admin/index.php')) ?>">
                         <?php
                         $topCount = count($tree);
                         foreach ($tree as $i => $page) {
@@ -356,20 +351,10 @@ require __DIR__ . '/../src/includes/header.php';
                                 <td><code><?= e($slug) ?></code></td>
                                 <td><?= e($updated) ?></td>
                                 <td class="actions admin-tree-actions">
-                                    <form method="post" class="inline-form">
-                                        <input type="hidden" name="action" value="reorder">
-                                        <input type="hidden" name="tab" value="pages">
-                                        <input type="hidden" name="slug" value="<?= e($slug) ?>">
-                                        <input type="hidden" name="direction" value="up">
-                                        <button type="submit" class="btn-icon" title="Move up" <?= $canUp ? '' : 'disabled' ?>>↑</button>
-                                    </form>
-                                    <form method="post" class="inline-form">
-                                        <input type="hidden" name="action" value="reorder">
-                                        <input type="hidden" name="tab" value="pages">
-                                        <input type="hidden" name="slug" value="<?= e($slug) ?>">
-                                        <input type="hidden" name="direction" value="down">
-                                        <button type="submit" class="btn-icon" title="Move down" <?= $canDown ? '' : 'disabled' ?>>↓</button>
-                                    </form>
+                                    <button type="button" class="btn-icon reorder-btn" data-direction="up"
+                                            title="Move up" aria-label="Move up" <?= $canUp ? '' : 'disabled' ?>>↑</button>
+                                    <button type="button" class="btn-icon reorder-btn" data-direction="down"
+                                            title="Move down" aria-label="Move down" <?= $canDown ? '' : 'disabled' ?>>↓</button>
                                     <a href="<?= e(url('?slug=' . rawurlencode($slug))) ?>">View</a>
                                     <a href="<?= e(url('admin/edit.php?slug=' . rawurlencode($slug))) ?>">Edit</a>
                                     <a href="<?= e(url('admin/edit.php?parent=' . rawurlencode($slug))) ?>">+ Sub</a>
@@ -404,20 +389,30 @@ require __DIR__ . '/../src/includes/header.php';
   if (!tree) return;
 
   var busy = false;
+  var reorderUrl = tree.getAttribute('data-reorder-url') || (window.location.pathname || '/admin/');
 
   function rowBySlug(slug) {
     return tree.querySelector('tr.admin-tree-row[data-slug="' + CSS.escape(slug) + '"]');
   }
 
+  /**
+   * Direct children of a parent. Top-level uses data-depth="0" because empty
+   * [data-parent=""] attribute selectors are unreliable in some browsers.
+   */
   function siblingRows(parentSlug) {
-    // Top-level rows use data-parent=""
+    if (parentSlug === '' || parentSlug == null) {
+      return Array.prototype.slice.call(
+        tree.querySelectorAll('tr.admin-tree-row[data-depth="0"]')
+      );
+    }
     return Array.prototype.slice.call(
       tree.querySelectorAll('tr.admin-tree-row[data-parent="' + CSS.escape(parentSlug) + '"]')
     );
   }
 
-  function descendantsOf(parentSlug) {
-    return siblingRows(parentSlug);
+  function parentOfRow(row) {
+    var p = row.getAttribute('data-parent');
+    return p == null ? '' : p;
   }
 
   /** Row + all nested descendant rows, in document (tree) order. */
@@ -425,7 +420,7 @@ require __DIR__ . '/../src/includes/header.php';
     var row = rowBySlug(slug);
     if (!row) return [];
     var out = [row];
-    descendantsOf(slug).forEach(function (child) {
+    siblingRows(slug).forEach(function (child) {
       var childSlug = child.getAttribute('data-slug');
       if (childSlug) {
         out = out.concat(collectSubtree(childSlug));
@@ -440,7 +435,7 @@ require __DIR__ . '/../src/includes/header.php';
       btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
       btn.textContent = expanded ? '▾' : '▸';
     }
-    descendantsOf(parentSlug).forEach(function (row) {
+    siblingRows(parentSlug).forEach(function (row) {
       if (expanded) {
         row.hidden = false;
         row.classList.remove('is-collapsed-row');
@@ -453,49 +448,49 @@ require __DIR__ . '/../src/includes/header.php';
     });
   }
 
-  function moveButtons(row) {
-    return {
-      up: row.querySelector('button.btn-icon[title="Move up"]'),
-      down: row.querySelector('button.btn-icon[title="Move down"]')
-    };
-  }
-
   function refreshSiblingButtons(parentSlug) {
     var sibs = siblingRows(parentSlug);
     sibs.forEach(function (row, i) {
-      var btns = moveButtons(row);
-      if (btns.up) btns.up.disabled = i === 0;
-      if (btns.down) btns.down.disabled = i === sibs.length - 1;
+      var up = row.querySelector('.reorder-btn[data-direction="up"]');
+      var down = row.querySelector('.reorder-btn[data-direction="down"]');
+      if (up) up.disabled = i === 0;
+      if (down) down.disabled = i === sibs.length - 1;
     });
   }
 
-  /** Insert a contiguous block of rows before a reference row. */
+  /** Place a contiguous block of rows before reference (not in the block). */
   function insertBlockBefore(block, reference) {
     if (!reference || !block.length) return;
     var parent = reference.parentNode;
-    block.forEach(function (r) {
-      parent.insertBefore(r, reference);
-    });
+    var frag = document.createDocumentFragment();
+    block.forEach(function (r) { frag.appendChild(r); });
+    parent.insertBefore(frag, reference);
   }
 
-  /** Insert a contiguous block of rows after the last node of another block. */
+  /** Place a contiguous block of rows after afterNode (not in the block). */
   function insertBlockAfter(block, afterNode) {
     if (!afterNode || !block.length) return;
     var parent = afterNode.parentNode;
     var ref = afterNode.nextSibling;
-    block.forEach(function (r) {
-      parent.insertBefore(r, ref);
-    });
+    // Skip past any nodes that are part of the moving block
+    var inBlock = Object.create(null);
+    block.forEach(function (r) { inBlock[r.getAttribute('data-slug') || ''] = true; });
+    while (ref && ref.nodeType === 1 && inBlock[ref.getAttribute('data-slug') || '']) {
+      ref = ref.nextSibling;
+    }
+    var frag = document.createDocumentFragment();
+    block.forEach(function (r) { frag.appendChild(r); });
+    parent.insertBefore(frag, ref);
   }
 
   /**
-   * Move slug's subtree up/down among its siblings in the live table
-   * (expand/collapse state is preserved because we don't reload).
+   * Move slug's subtree up/down among its siblings in the live table.
+   * Expand/collapse state is preserved (no reload).
    */
   function moveInDom(slug, direction) {
     var row = rowBySlug(slug);
     if (!row) return false;
-    var parentSlug = row.getAttribute('data-parent') || '';
+    var parentSlug = parentOfRow(row);
     var sibs = siblingRows(parentSlug);
     var idx = -1;
     for (var i = 0; i < sibs.length; i++) {
@@ -507,10 +502,11 @@ require __DIR__ . '/../src/includes/header.php';
     if (idx < 0) return false;
 
     var block = collectSubtree(slug);
+    if (!block.length) return false;
+
     if (direction === 'up') {
       if (idx <= 0) return false;
-      var prevSlug = sibs[idx - 1].getAttribute('data-slug');
-      var prevRow = rowBySlug(prevSlug);
+      var prevRow = sibs[idx - 1];
       if (!prevRow) return false;
       insertBlockBefore(block, prevRow);
     } else if (direction === 'down') {
@@ -527,6 +523,31 @@ require __DIR__ . '/../src/includes/header.php';
     return true;
   }
 
+  function saveReorder(slug, direction) {
+    var body = new FormData();
+    body.set('action', 'reorder');
+    body.set('slug', slug);
+    body.set('direction', direction);
+    body.set('tab', 'pages');
+    body.set('ajax', '1');
+
+    return fetch(reorderUrl, {
+      method: 'POST',
+      body: body,
+      credentials: 'same-origin',
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    }).then(function (res) {
+      if (res.status === 401 || res.redirected) {
+        throw new Error('auth');
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    });
+  }
+
   tree.addEventListener('click', function (e) {
     var toggle = e.target.closest('.tree-toggle');
     if (toggle && tree.contains(toggle)) {
@@ -537,55 +558,33 @@ require __DIR__ . '/../src/includes/header.php';
       setExpanded(tSlug, !open);
       return;
     }
-  });
 
-  // In-place AJAX reorder — no full page reset of expand/scroll.
-  tree.addEventListener('submit', function (e) {
-    var form = e.target;
-    if (!form || form.tagName !== 'FORM' || !tree.contains(form)) return;
-    var actionInput = form.querySelector('input[name="action"]');
-    if (!actionInput || actionInput.value !== 'reorder') return;
-
+    var btn = e.target.closest('.reorder-btn');
+    if (!btn || !tree.contains(btn) || btn.disabled) return;
     e.preventDefault();
+    e.stopPropagation();
     if (busy) return;
 
-    var slugInput = form.querySelector('input[name="slug"]');
-    var dirInput = form.querySelector('input[name="direction"]');
-    var slug = slugInput ? slugInput.value : '';
-    var direction = dirInput ? dirInput.value : '';
+    var row = btn.closest('tr.admin-tree-row');
+    if (!row) return;
+    var slug = row.getAttribute('data-slug');
+    var direction = btn.getAttribute('data-direction');
     if (!slug || (direction !== 'up' && direction !== 'down')) return;
 
-    var submitBtn = form.querySelector('button[type="submit"]');
-    if (submitBtn && submitBtn.disabled) return;
+    // Optimistic UI: move first so expand state / scroll stay put and feedback is instant
+    if (!moveInDom(slug, direction)) return;
 
     busy = true;
     tree.classList.add('is-reordering');
 
-    var body = new FormData(form);
-    body.set('ajax', '1');
-
-    fetch(form.action || window.location.href, {
-      method: 'POST',
-      body: body,
-      credentials: 'same-origin',
-      headers: {
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      }
-    })
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      })
+    saveReorder(slug, direction)
       .then(function (data) {
         if (!data || !data.ok) {
-          // Server refused (already at edge, race, etc.) — leave DOM as-is
-          return;
+          // Server rejected — resync from disk
+          window.location.reload();
         }
-        moveInDom(slug, direction);
       })
       .catch(function () {
-        // Fallback: full reload so order still matches disk
         window.location.reload();
       })
       .finally(function () {

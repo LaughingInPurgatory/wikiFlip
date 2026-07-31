@@ -26,8 +26,9 @@ No MySQL. No Composer at runtime. Optional Docker image built by GitHub Actions.
 - **Flat-file storage** — one folder per page, `content.md` + media
 - **Nested categories** — unlimited depth via nested folders
 - **Markdown + WYSIWYG** — Toast UI Editor (bundled locally, no CDN required)
-- **Images & PDFs** — stored in the page folder; relative paths like `![alt](photo.png)`
+- **Images & PDFs** — stored in the page folder; images render as thumbnails with a full-size lightbox
 - **Inline PDF viewer** — upload from the editor toolbar
+- **Creation-date ordering** — categories default to newest-created pages until manually reordered
 - **Admin auth** — session login; credentials from **env** or `config/admin.php`
 - **Docker** — self-contained image, `pages/` as a volume
 - **CI** — GitHub Actions builds and publishes to **GHCR**
@@ -157,6 +158,21 @@ pages/
 | Media | Files in the same folder as `content.md` |
 | Public media URL | `media.php?slug={page}&file={filename}` |
 | Parent in the app | Derived from the folder path |
+| Creation timestamp | Immutable `.created_at` sidecar file per page |
+
+Images in page content are displayed as smaller thumbnails. Click a thumbnail to
+open the full image over the article, then close it with the close button, by
+clicking outside the image, or with `Escape`. This applies to existing content as
+well as newly uploaded images.
+
+Categories without a saved manual order show pages newest-first by their original
+creation timestamp. Moving a page with the admin controls saves that category's
+order in `.order.json`; editing an existing page does not change its creation
+timestamp or move it automatically.
+
+For pages created before creation timestamps were introduced, WikiFlip seeds a
+one-time timestamp from the earliest available filesystem timestamp and then keeps
+it unchanged.
 
 Legacy `page.json` / HTML content is auto-migrated to `content.md` on load when present.
 
@@ -168,6 +184,11 @@ Legacy `page.json` / HTML content is auto-migrated to `content.md` on load when 
 2. Create or edit pages; set **parent** for nesting.
 3. Set the **URL slug** before uploading media (defines the page folder).
 4. Use the editor in **WYSIWYG** or **Markdown** mode; **PDF** button uploads an inline viewer.
+
+Page order defaults to newest-created first within each category. Use the move
+controls to save a custom order when required; custom ordering takes precedence
+until the category's `.order.json` is removed. Editing content does not affect the
+original creation order.
 
 ### Credentials
 

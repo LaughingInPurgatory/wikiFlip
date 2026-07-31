@@ -8,6 +8,7 @@ namespace WikiApp\Core;
  * Folder-per-page storage.
  *
  *   pages/{slug}/content.md
+ *   pages/{slug}/.created_at       ← immutable creation timestamp
  *   pages/{parent}/{slug}/content.md
  *   pages/{parent}/{slug}/image.png   ← relative media next to content.md
  *   pages/.order.json                 ← sibling order under root
@@ -19,6 +20,7 @@ class DatabaseManager
 {
     private const PAGES_DIR = WIKIFLIP_ROOT . '/pages/';
     public const CONTENT_FILE = 'content.md';
+    private const CREATED_FILE = '.created_at';
     /** @deprecated legacy */
     private const LEGACY_JSON = 'page.json';
     private const LAYOUT_STAMP = '.wikiflip-layout-v2';
@@ -270,7 +272,7 @@ class DatabaseManager
     }
 
     /**
-     * @return array{title: string, slug: string, content: string, parent: string, updated_at?: string}|null
+     * @return array{title: string, slug: string, content: string, parent: string, created_at?: string, updated_at?: string}|null
      *         content = markdown body (without leading # title)
      */
     public static function getPageBySlug(string $slug): ?array
@@ -312,6 +314,12 @@ class DatabaseManager
         if ($mtime) {
             $out['updated_at'] = date('c', $mtime);
         }
+        $fallback = $mtime ?: time();
+        $dirMtime = @filemtime(dirname($filePath));
+        if ($dirMtime && $dirMtime < $fallback) {
+            $fallback = $dirMtime;
+        }
+        $out['created_at'] = date('c', self::readOrCreateCreatedAt(self::pageDirFromFile($filePath), $fallback));
         self::$pageCache[$slug] = $out;
         return $out;
     }
@@ -359,8 +367,7 @@ class DatabaseManager
             self::getAllPages(),
             static fn(array $p): bool => ($p['parent'] ?? '') === ''
         ));
-        usort($top, static fn(array $a, array $b): int => strcasecmp($a['title'], $b['title']));
-        return $top;
+        return self::sortByOrder($top, '');
     }
 
     /**
@@ -516,6 +523,16 @@ class DatabaseManager
             return [];
         }
         $order = self::getOrder($parentSlug);
+        if ($order === []) {
+            usort($pages, static function (array $a, array $b): int {
+                $createdCompare = self::pageCreationTimestamp($b) <=> self::pageCreationTimestamp($a);
+                if ($createdCompare !== 0) {
+                    return $createdCompare;
+                }
+                return strcasecmp((string) $a['title'], (string) $b['title']);
+            });
+            return $pages;
+        }
         $bySlug = [];
         foreach ($pages as $p) {
             $bySlug[(string) $p['slug']] = $p;
@@ -532,6 +549,12 @@ class DatabaseManager
         $rest = array_values($bySlug);
         usort($rest, static fn(array $a, array $b): int => strcasecmp($a['title'], $b['title']));
         return array_merge($sorted, $rest);
+    }
+
+    private static function pageCreationTimestamp(array $page): int
+    {
+        $timestamp = strtotime((string) ($page['created_at'] ?? ''));
+        return $timestamp === false ? 0 : $timestamp;
     }
 
     /**
@@ -715,6 +738,9 @@ class DatabaseManager
 
         $oldPath = self::findFilePath($slug);
         $oldDir = $oldPath !== null ? self::pageDirFromFile($oldPath) : null;
+        $createdAt = $oldDir !== null
+            ? self::readOrCreateCreatedAt($oldDir, self::creationFallback($oldPath))
+            : time();
 
         $newPath = self::pathForPage($slug, $parent);
         if ($newPath === null) {
@@ -745,6 +771,8 @@ class DatabaseManager
             return false;
         }
 
+        self::readOrCreateCreatedAt($newDir, $createdAt);
+
         $body = Markdown::relativizeMediaPaths($body, $slug);
         $doc = Markdown::buildDocument($title, $body);
 
@@ -757,6 +785,33 @@ class DatabaseManager
         self::removeStaleCopies($slug, $newPath);
         self::invalidateCache();
         return true;
+    }
+
+    private static function creationFallback(?string $filePath): int
+    {
+        if ($filePath === null) {
+            return time();
+        }
+        $mtime = @filemtime($filePath) ?: time();
+        $dirMtime = @filemtime(dirname($filePath));
+        return $dirMtime && $dirMtime < $mtime ? $dirMtime : $mtime;
+    }
+
+    private static function readOrCreateCreatedAt(string $pageDir, int $fallback): int
+    {
+        $path = $pageDir . '/' . self::CREATED_FILE;
+        if (is_file($path)) {
+            $raw = trim((string) @file_get_contents($path));
+            if (preg_match('/^\d+$/', $raw) === 1 && (int) $raw > 0) {
+                return (int) $raw;
+            }
+        }
+
+        $createdAt = $fallback > 0 ? $fallback : time();
+        if (is_dir($pageDir) && @file_put_contents($path, $createdAt . "\n", LOCK_EX) !== false) {
+            @chmod($path, 0644);
+        }
+        return $createdAt;
     }
 
     public static function deletePage(string $slug): bool

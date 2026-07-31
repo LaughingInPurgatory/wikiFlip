@@ -1685,3 +1685,124 @@ table tr:hover {
     border-right: 0;
   }
 }
+
+/* ========== Public image thumbnails / lightbox ========== */
+
+.is-public .wiki-article-content img {
+  width: auto;
+  max-width: min(100%, 480px);
+  max-height: 320px;
+  height: auto;
+  cursor: zoom-in;
+  object-fit: contain;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.is-public .wiki-article-content img:hover,
+.is-public .wiki-article-content img:focus-visible {
+  border-color: rgba(124, 140, 255, 0.5);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), 0 0 18px rgba(124, 140, 255, 0.16);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+body.image-lightbox-open {
+  overflow: hidden;
+}
+
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.image-lightbox[hidden] {
+  display: none;
+}
+
+.image-lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: rgba(7, 8, 18, 0.84);
+  cursor: zoom-out;
+  box-shadow: none;
+}
+
+.image-lightbox-backdrop:hover {
+  background: rgba(7, 8, 18, 0.84);
+  border: 0;
+  box-shadow: none;
+}
+
+.image-lightbox-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  width: min(92vw, 1200px);
+  max-height: calc(100vh - 48px);
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: rgba(18, 20, 42, 0.94);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.image-lightbox-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 130px);
+  border-radius: 10px;
+  object-fit: contain;
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  background: rgba(18, 20, 42, 0.88);
+  color: var(--text);
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.image-lightbox-caption {
+  max-width: 100%;
+  margin: 9px 40px 2px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .is-public .wiki-article-content img {
+    max-height: 240px;
+  }
+
+  .image-lightbox {
+    padding: 12px;
+  }
+
+  .image-lightbox-panel {
+    width: 96vw;
+    padding: 8px;
+  }
+
+  .image-lightbox-image {
+    max-height: calc(100vh - 90px);
+  }
+}

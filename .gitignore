@@ -8,4 +8,5 @@
 pages/.wikiflip-layout-v2
 pages/.order.json
 pages/**/.order.json
+pages/**/.created_at
 pages/.site/

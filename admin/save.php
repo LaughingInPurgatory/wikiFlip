@@ -21,6 +21,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+Auth::requireCsrf(json: true);
+
 if ((string) ($_POST['action'] ?? '') !== 'save_page') {
     http_response_code(400);
     echo json_encode(['success' => false, 'message' => 'Invalid action.']);
@@ -52,6 +54,19 @@ if ($isNew && DatabaseManager::getPageBySlug($slug) !== null) {
     exit;
 }
 
+if (!$isNew) {
+    if ($originalSlug === '' || $slug !== $originalSlug) {
+        http_response_code(409);
+        echo json_encode(['success' => false, 'message' => 'Page slugs cannot be changed after creation.']);
+        exit;
+    }
+    if (DatabaseManager::getPageBySlug($originalSlug) === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => 'The page being edited no longer exists.']);
+        exit;
+    }
+}
+
 if ($slug === 'home') {
     $parent = '';
 }
@@ -67,8 +82,7 @@ if ($parent !== '') {
         echo json_encode(['success' => false, 'message' => 'Selected parent page does not exist.']);
         exit;
     }
-    $checkSlug = $isNew ? $slug : ($originalSlug !== '' ? $originalSlug : $slug);
-    if (!$isNew && DatabaseManager::isDescendantOf($parent, $checkSlug)) {
+    if (!$isNew && DatabaseManager::isDescendantOf($parent, $slug)) {
         http_response_code(422);
         echo json_encode(['success' => false, 'message' => 'Cannot move a page under one of its own sub-pages.']);
         exit;
@@ -88,10 +102,6 @@ $success = DatabaseManager::savePage([
 ]);
 
 if ($success) {
-    if (!$isNew && $originalSlug !== '' && $originalSlug !== $slug) {
-        DatabaseManager::deletePage($originalSlug);
-    }
-
     echo json_encode([
         'success' => true,
         'message' => 'Page saved successfully.',

@@ -41,6 +41,7 @@ function admin_redirect(string $tab): never
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    Auth::requireCsrf($wantsAjaxAuth);
     $action = (string) ($_POST['action'] ?? '');
 
     if ($action === 'delete_page') {
@@ -183,6 +184,7 @@ function render_admin_tree_child(array $page, array $siblings, int $depth, strin
                 <form method="post" class="inline-form" onsubmit="return confirm('Delete this page?<?= $hasChildren ? ' Sub-pages move up one level.' : '' ?>');">
                     <input type="hidden" name="action" value="delete_page">
                     <input type="hidden" name="tab" value="pages">
+                    <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
                     <input type="hidden" name="slug" value="<?= e($slug) ?>">
                     <button type="submit" class="link-danger">Delete</button>
                 </form>
@@ -233,6 +235,7 @@ require __DIR__ . '/../src/includes/header.php';
             <form method="post" enctype="multipart/form-data" class="branding-form">
                 <input type="hidden" name="action" value="save_branding">
                 <input type="hidden" name="tab" value="branding">
+                <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
 
                 <h3 class="admin-section-title">Site identity</h3>
                 <div class="branding-grid">
@@ -315,7 +318,8 @@ require __DIR__ . '/../src/includes/header.php';
                         </tr>
                     </thead>
                     <tbody id="adminPageTree"
-                           data-reorder-url="<?= e(url('admin/index.php')) ?>">
+                           data-reorder-url="<?= e(url('admin/index.php')) ?>"
+                           data-csrf-token="<?= e(Auth::csrfToken()) ?>">
                         <?php
                         $topCount = count($tree);
                         foreach ($tree as $i => $page) {
@@ -362,6 +366,7 @@ require __DIR__ . '/../src/includes/header.php';
                                         <form method="post" class="inline-form" onsubmit="return confirm('Delete this page?<?= $hasChildren ? ' Sub-pages move up one level.' : '' ?>');">
                                             <input type="hidden" name="action" value="delete_page">
                                             <input type="hidden" name="tab" value="pages">
+                                            <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
                                             <input type="hidden" name="slug" value="<?= e($slug) ?>">
                                             <button type="submit" class="link-danger">Delete</button>
                                         </form>
@@ -390,6 +395,7 @@ require __DIR__ . '/../src/includes/header.php';
 
   var busy = false;
   var reorderUrl = tree.getAttribute('data-reorder-url') || (window.location.pathname || '/admin/');
+  var csrfToken = tree.getAttribute('data-csrf-token') || '';
 
   function rowBySlug(slug) {
     return tree.querySelector('tr.admin-tree-row[data-slug="' + CSS.escape(slug) + '"]');
@@ -530,6 +536,7 @@ require __DIR__ . '/../src/includes/header.php';
     body.set('direction', direction);
     body.set('tab', 'pages');
     body.set('ajax', '1');
+    body.set('csrf_token', csrfToken);
 
     return fetch(reorderUrl, {
       method: 'POST',

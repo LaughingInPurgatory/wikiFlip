@@ -73,9 +73,14 @@ class DatabaseManager
             \RecursiveIteratorIterator::SELF_FIRST
         );
         $jsonFiles = [];
+        $siteDir = str_replace('\\', '/', rtrim(self::PAGES_DIR, '/\\')) . '/.site/';
         foreach ($iterator as $fileInfo) {
             /** @var \SplFileInfo $fileInfo */
             if (!$fileInfo->isFile()) {
+                continue;
+            }
+            $path = str_replace('\\', '/', $fileInfo->getPathname());
+            if (str_starts_with($path, $siteDir)) {
                 continue;
             }
             $name = $fileInfo->getFilename();

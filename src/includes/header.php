@@ -149,14 +149,16 @@ if (!function_exists('render_nav_tree')) {
                        aria-label="New page">
                         <span class="sidenav-icon-plus" aria-hidden="true">+</span>
                     </a>
-                    <a class="sidenav-icon-btn"
-                       href="<?= e(url('admin/logout.php')) ?>"
-                       title="Log out<?= $adminUser ? ' (' . $adminUser . ')' : '' ?>"
-                       aria-label="Log out<?= $adminUser ? ' (' . e($adminUser) . ')' : '' ?>">
-                        <svg class="sidenav-icon-svg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                            <path fill="currentColor" d="M10 3a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0V5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h3v-3a1 1 0 1 1 2 0v4a1 1 0 0 1-1 1H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h4zm5.3 5.3a1 1 0 0 1 1.4 0l4 4a1 1 0 0 1 0 1.4l-4 4a1 1 0 1 1-1.4-1.4L17.58 14H10a1 1 0 1 1 0-2h7.58l-2.28-2.3a1 1 0 0 1 0-1.4z"/>
-                        </svg>
-                    </a>
+                    <form method="post" action="<?= e(url('admin/logout.php')) ?>" class="sidenav-logout-form">
+                        <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
+                        <button type="submit" class="sidenav-icon-btn"
+                                title="Log out<?= $adminUser ? ' (' . $adminUser . ')' : '' ?>"
+                                aria-label="Log out<?= $adminUser ? ' (' . e($adminUser) . ')' : '' ?>">
+                            <svg class="sidenav-icon-svg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M10 3a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0V5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h3v-3a1 1 0 1 1 2 0v4a1 1 0 0 1-1 1H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h4zm5.3 5.3a1 1 0 0 1 1.4 0l4 4a1 1 0 0 1 0 1.4l-4 4a1 1 0 1 1-1.4-1.4L17.58 14H10a1 1 0 1 1 0-2h7.58l-2.28-2.3a1 1 0 0 1 0-1.4z"/>
+                            </svg>
+                        </button>
+                    </form>
                 <?php endif; ?>
             </div>
 

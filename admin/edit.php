@@ -67,6 +67,7 @@ require __DIR__ . '/../src/includes/header.php';
 
     <form id="editForm" action="<?= e(url('admin/save.php')) ?>" method="POST">
         <input type="hidden" name="action" value="save_page">
+        <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
         <input type="hidden" name="is_new" value="<?= $isNew ? '1' : '0' ?>">
         <?php if (!$isNew): ?>
             <input type="hidden" name="original_slug" value="<?= e($initialData['slug']) ?>">

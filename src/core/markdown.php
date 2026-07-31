@@ -61,8 +61,8 @@ final class Markdown
     {
         $pd = new \Parsedown();
         $pd->setBreaksEnabled(true);
-        $pd->setSafeMode(false);
-        $pd->setMarkupEscaped(false);
+        $pd->setSafeMode(true);
+        $pd->setMarkupEscaped(true);
         return $pd->text($markdown);
     }
 
@@ -71,10 +71,69 @@ final class Markdown
      */
     public static function renderPageBody(string $markdown, string $pageSlug): string
     {
+        $embeds = [];
+        $markdown = self::protectPdfEmbeds($markdown, $pageSlug, $embeds);
         $html = self::toHtml($markdown);
+        foreach ($embeds as $token => $embed) {
+            $pattern = '~<p>\\s*' . preg_quote($token, '~') . '\\s*</p>~';
+            $html = preg_replace($pattern, $embed, $html, 1) ?? $html;
+        }
         $html = self::rewriteWikiLinks($html);
         $html = self::rewriteRelativeMedia($html, $pageSlug);
         return $html;
+    }
+
+    /**
+     * Preserve only editor-generated, page-local PDF embeds before safe parsing.
+     * All other raw HTML remains escaped by Parsedown safe mode.
+     *
+     * @param array<string, string> $embeds
+     */
+    private static function protectPdfEmbeds(string $markdown, string $pageSlug, array &$embeds): string
+    {
+        return preg_replace_callback(
+            "~<div\\b[^>]*\\bclass\\s*=\\s*([\"'])[^\"']*\\bpdf-embed\\b[^\"']*\\1[^>]*>.*?</div>~is",
+            static function (array $match) use ($pageSlug, &$embeds): string {
+                if (!preg_match("~<iframe\\b[^>]*\\bsrc\\s*=\\s*([\"'])(.*?)\\1~is", $match[0], $srcMatch)) {
+                    return $match[0];
+                }
+
+                $file = self::pdfFileForPage($srcMatch[2], $pageSlug);
+                if ($file === null) {
+                    return $match[0];
+                }
+
+                $token = 'WIKIFLIP_PDF_' . bin2hex(random_bytes(12));
+                $mediaUrl = url(
+                    'media.php?slug=' . rawurlencode(DatabaseManager::sanitizeSlug($pageSlug))
+                    . '&file=' . rawurlencode($file)
+                );
+                $safeUrl = htmlspecialchars($mediaUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $safeTitle = htmlspecialchars(basename($file), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $embeds[$token] = '<div class="pdf-embed">'
+                    . '<iframe class="pdf-frame" src="' . $safeUrl . '#view=FitH" title="' . $safeTitle . '"></iframe>'
+                    . '<p class="pdf-embed-actions"><a href="' . $safeUrl . '" target="_blank" rel="noopener">Open PDF</a> · '
+                    . '<a href="' . $safeUrl . '" download>Download</a></p></div>';
+                return "\n\n{$token}\n\n";
+            },
+            $markdown
+        ) ?? $markdown;
+    }
+
+    private static function pdfFileForPage(string $url, string $pageSlug): ?string
+    {
+        $url = html_entity_decode(trim($url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $file = self::mediaUrlToRelativeFile($url);
+        if ($file === null) {
+            $file = explode('?', explode('#', $url, 2)[0], 2)[0];
+            if (!preg_match('#^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\\.pdf$#i', $file)) {
+                return null;
+            }
+        }
+        if (!str_ends_with(strtolower($file), '.pdf')) {
+            return null;
+        }
+        return DatabaseManager::resolveMediaFile($pageSlug, $file) === null ? null : $file;
     }
 
     /**

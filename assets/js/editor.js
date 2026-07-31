@@ -96,6 +96,7 @@
       const fd = new FormData();
       fd.append("file", file, file.name || "upload");
       fd.append("slug", slug);
+      if (cfg.csrfToken) fd.append("csrf_token", cfg.csrfToken);
       if (titleInput) fd.append("title", titleInput.value || slug);
       if (parentSelect) fd.append("parent", parentSelect.value || "");
 

@@ -17,6 +17,7 @@ namespace WikiApp\Core;
 final class Auth
 {
     private const SESSION_USER_KEY = 'wikiflip_admin_user';
+    private const SESSION_CSRF_KEY = 'wikiflip_csrf_token';
 
     /** @var array{username: string, password_hash: string}|null */
     private static ?array $config = null;
@@ -99,6 +100,48 @@ final class Auth
         self::startSession();
         $user = $_SESSION[self::SESSION_USER_KEY] ?? null;
         return is_string($user) && $user !== '' ? $user : null;
+    }
+
+    public static function csrfToken(): string
+    {
+        self::startSession();
+        $token = $_SESSION[self::SESSION_CSRF_KEY] ?? null;
+        if (!is_string($token) || $token === '') {
+            $token = bin2hex(random_bytes(32));
+            $_SESSION[self::SESSION_CSRF_KEY] = $token;
+        }
+        return $token;
+    }
+
+    public static function verifyCsrf(?string $token = null): bool
+    {
+        self::startSession();
+        $expected = $_SESSION[self::SESSION_CSRF_KEY] ?? null;
+        $token ??= (string) ($_POST['csrf_token'] ?? '');
+        return is_string($expected) && $expected !== ''
+            && $token !== ''
+            && hash_equals($expected, $token);
+    }
+
+    public static function requireCsrf(bool $json = false): void
+    {
+        if (self::verifyCsrf()) {
+            return;
+        }
+
+        http_response_code(403);
+        if ($json) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'success' => false,
+                'error' => 'Invalid form token.',
+                'message' => 'Your form expired. Reload the page and try again.',
+            ]);
+        } else {
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Invalid form token. Reload the page and try again.';
+        }
+        exit;
     }
 
     public static function attempt(string $username, string $password): bool

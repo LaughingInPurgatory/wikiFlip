@@ -9,10 +9,13 @@
 declare(strict_types=1);
 
 $uri = urldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/');
-$file = __DIR__ . $uri;
+$root = realpath(__DIR__);
+$file = $root === false ? false : realpath($root . $uri);
 
 // Serve real files (assets, admin scripts, etc.)
-if ($uri !== '/' && is_file($file)) {
+if ($uri !== '/' && $file !== false
+    && str_starts_with($file, $root . DIRECTORY_SEPARATOR)
+    && is_file($file)) {
     return false;
 }
 

@@ -49,6 +49,38 @@ $isAdmin = $isAdmin ?? false;
     })();
     </script>
 
+    <script>
+    (function () {
+        var toc = document.querySelector('.page-toc');
+        var article = document.querySelector('.wiki-article');
+        var links = toc ? toc.querySelector('.page-toc-links') : null;
+        if (!toc || !article || !links) return;
+
+        var headings = article.querySelectorAll('.wiki-article-content h2, .wiki-article-content h3, .subpage-list h2');
+        var usedIds = {};
+        headings.forEach(function (heading) {
+            var base = (heading.textContent || 'section').trim().toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '') || 'section';
+            var id = base;
+            var suffix = 2;
+            while (usedIds[id] || document.getElementById(id)) {
+                id = base + '-' + suffix++;
+            }
+            usedIds[id] = true;
+            heading.id = id;
+
+            var link = document.createElement('a');
+            link.href = '#' + id;
+            link.textContent = heading.textContent;
+            if (heading.tagName.toLowerCase() === 'h3') link.className = 'is-nested';
+            links.appendChild(link);
+        });
+
+        if (headings.length) toc.hidden = false;
+    })();
+    </script>
+
     <?php if (!empty($loadEditor)): ?>
     <script>
         window.WIKIFLIP = {
@@ -56,6 +88,7 @@ $isAdmin = $isAdmin ?? false;
             saveUrl: <?= json_encode(url('admin/save.php')) ?>,
             uploadUrl: <?= json_encode(url('admin/upload.php')) ?>,
             mediaBase: <?= json_encode(url('media.php')) ?>,
+            csrfToken: <?= json_encode(\WikiApp\Core\Auth::csrfToken()) ?>,
             pageSlug: <?= json_encode((string) ($initialData['slug'] ?? ($_GET['slug'] ?? ''))) ?>,
             initialMarkdown: <?= json_encode((string) ($initialData['content'] ?? ''), JSON_UNESCAPED_UNICODE) ?>
         };

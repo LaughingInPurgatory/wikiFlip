@@ -22,6 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+Auth::requireCsrf(json: true);
+
 $slug = DatabaseManager::sanitizeSlug((string) ($_POST['slug'] ?? ''));
 if ($slug === '') {
     http_response_code(422);

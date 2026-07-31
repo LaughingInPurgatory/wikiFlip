@@ -28,14 +28,19 @@ if ($returnTo === '' || !str_starts_with($returnTo, '/') || str_starts_with($ret
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = (string) ($_POST['username'] ?? '');
-    $password = (string) ($_POST['password'] ?? '');
+    if (!Auth::verifyCsrf()) {
+        http_response_code(403);
+        $error = 'Your login form expired. Reload the page and try again.';
+    } else {
+        $username = (string) ($_POST['username'] ?? '');
+        $password = (string) ($_POST['password'] ?? '');
 
-    if (Auth::attempt($username, $password)) {
-        header('Location: ' . $returnTo);
-        exit;
+        if (Auth::attempt($username, $password)) {
+            header('Location: ' . $returnTo);
+            exit;
+        }
+        $error = 'Invalid username or password.';
     }
-    $error = 'Invalid username or password.';
 }
 
 $isAdmin = false; // login page uses public chrome (no TinyMCE)
@@ -55,6 +60,7 @@ require __DIR__ . '/../src/includes/header.php';
 
     <form method="post" action="<?= e(url('admin/login.php')) ?>" class="login-form" autocomplete="on">
         <input type="hidden" name="return" value="<?= e($returnTo) ?>">
+        <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
 
         <div class="form-group">
             <label for="username">Username</label>

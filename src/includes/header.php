@@ -85,12 +85,17 @@ if (!function_exists('render_nav_tree')) {
             if ($branchActive) {
                 $liClass[] = 'has-active-child';
             }
+            $hasChildren = $children !== [];
+            if ($hasChildren) {
+                $liClass[] = 'has-children';
+                $liClass[] = ($isActive || $branchActive) ? 'is-expanded' : 'is-collapsed';
+            }
             ?>
-            <li class="<?= e(implode(' ', $liClass)) ?>">
-                <a<?= $isActive ? ' class="is-active"' : '' ?> href="<?= e(url('?slug=' . rawurlencode($navSlug))) ?>">
+            <li class="<?= e(implode(' ', $liClass)) ?>"<?= $hasChildren ? ' data-nav-branch="' . e($navSlug) . '"' : '' ?>>
+                <a<?= $isActive ? ' class="is-active"' : '' ?><?= $hasChildren ? ' aria-expanded="' . (($isActive || $branchActive) ? 'true' : 'false') . '"' : '' ?> href="<?= e(url('?slug=' . rawurlencode($navSlug))) ?>">
                     <?= e($navTitle) ?>
                 </a>
-                <?php if ($children !== []): ?>
+                <?php if ($hasChildren): ?>
                     <ul class="sidenav-subnav">
                         <?php render_nav_tree($children, $currentSlug, $isAdmin, $depth + 1, $renderedSlugs); ?>
                     </ul>

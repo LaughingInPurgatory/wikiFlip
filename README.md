@@ -11,6 +11,7 @@ It includes:
 - Image thumbnails that open in a full-size lightbox
 - Inline PDF viewing
 - Newest-created-first page ordering, with optional manual ordering
+- Expandable and collapsible category navigation
 - A dark indigo interface for both the public site and the admin area
 - A ready-to-run Docker image published to GitHub Container Registry
 
@@ -92,9 +93,15 @@ Images appear as smaller thumbnails in the article. Click one to see the full
 image, then close the preview with the close button, by clicking outside it, or by
 pressing `Escape`.
 
-Pages in each category are sorted newest-created-first by default. Moving a page
-with the admin controls saves a manual order for that category. Editing an older
-page does not change its original creation date or move it to the top.
+Click a category in the sidebar to expand or collapse its sub-pages. The chevron
+shows whether the category is open, and the choice is kept while you move around
+the wiki.
+
+Pages in each category are sorted newest-created-first by default. If a category
+already has a manual order, a newly created page is still placed at the top until
+you move it with the admin controls. Moving a page saves a manual order for that
+category. Editing an older page does not change its original creation date or move
+it to the top.
 
 ## How content is stored
 

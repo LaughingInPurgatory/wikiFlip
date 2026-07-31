@@ -234,7 +234,7 @@ code {
   margin-bottom: 2px;
 }
 
-/* Collapse nested lists unless this branch contains the current page */
+/* Categories can be toggled without changing their page link. */
 .sidenav-subnav {
   list-style: none;
   margin: 0;
@@ -244,10 +244,22 @@ code {
   display: none;
 }
 
-.sidenav-nav .is-current > .sidenav-subnav,
-.sidenav-nav .has-active-child > .sidenav-subnav {
+.sidenav-nav .has-children.is-expanded > .sidenav-subnav {
   display: block;
   margin-bottom: 6px;
+}
+
+.sidenav-nav .has-children > a::after {
+  content: '⌄';
+  float: right;
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.sidenav-nav .has-children.is-collapsed > a::after {
+  content: '›';
 }
 
 .sidenav-subnav a {

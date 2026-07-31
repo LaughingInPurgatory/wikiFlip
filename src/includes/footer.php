@@ -51,6 +51,73 @@ $isAdmin = $isAdmin ?? false;
 
     <script>
     (function () {
+        var nav = document.querySelector('.sidenav-nav');
+        if (!nav) return;
+
+        var storageKey = 'wikiflip.nav-category-state';
+        var state = {};
+        try {
+            state = JSON.parse(window.localStorage.getItem(storageKey) || '{}') || {};
+        } catch (error) {
+            state = {};
+        }
+
+        var hashMatch = /^#wikiflip-nav-(expanded|collapsed)-(.+)$/.exec(window.location.hash);
+        var hashState = hashMatch ? {
+            slug: decodeURIComponent(hashMatch[2]),
+            expanded: hashMatch[1] === 'expanded'
+        } : null;
+
+        function setExpanded(branch, link, expanded) {
+            branch.classList.toggle('is-expanded', expanded);
+            branch.classList.toggle('is-collapsed', !expanded);
+            link.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        }
+
+        function saveState(slug, expanded) {
+            state[slug] = expanded ? 'expanded' : 'collapsed';
+            try {
+                window.localStorage.setItem(storageKey, JSON.stringify(state));
+            } catch (error) {
+                // Navigation still works when storage is unavailable.
+            }
+        }
+
+        nav.querySelectorAll('li.has-children[data-nav-branch]').forEach(function (branch) {
+            var slug = branch.getAttribute('data-nav-branch');
+            var link = Array.prototype.find.call(branch.children, function (child) {
+                return child.tagName === 'A';
+            });
+            if (!slug || !link) return;
+
+            if (state[slug] === 'expanded' || state[slug] === 'collapsed') {
+                setExpanded(branch, link, state[slug] === 'expanded');
+            }
+            if (hashState && hashState.slug === slug) {
+                setExpanded(branch, link, hashState.expanded);
+                if (window.history && window.history.replaceState) {
+                    window.history.replaceState(null, '', window.location.href.split('#')[0]);
+                }
+            }
+
+            link.addEventListener('click', function () {
+                var expanded = branch.classList.contains('is-expanded');
+                var nextExpanded = !expanded;
+                setExpanded(branch, link, nextExpanded);
+                saveState(slug, nextExpanded);
+
+                var target = link.getAttribute('href') || '';
+                target = target.split('#')[0];
+                link.setAttribute('href', target + '#wikiflip-nav-'
+                    + (nextExpanded ? 'expanded-' : 'collapsed-')
+                    + encodeURIComponent(slug));
+            });
+        });
+    })();
+    </script>
+
+    <script>
+    (function () {
         var toc = document.querySelector('.page-toc');
         var article = document.querySelector('.wiki-article');
         var links = toc ? toc.querySelector('.page-toc-links') : null;

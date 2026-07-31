@@ -545,10 +545,16 @@ class DatabaseManager
                 unset($bySlug[$s]);
             }
         }
-        // Remaining: alpha by title (stable default)
+        // New/unlisted pages belong at the top until an admin explicitly places them.
         $rest = array_values($bySlug);
-        usort($rest, static fn(array $a, array $b): int => strcasecmp($a['title'], $b['title']));
-        return array_merge($sorted, $rest);
+        usort($rest, static function (array $a, array $b): int {
+            $createdCompare = self::pageCreationTimestamp($b) <=> self::pageCreationTimestamp($a);
+            if ($createdCompare !== 0) {
+                return $createdCompare;
+            }
+            return strcasecmp((string) $a['title'], (string) $b['title']);
+        });
+        return array_merge($rest, $sorted);
     }
 
     private static function pageCreationTimestamp(array $page): int

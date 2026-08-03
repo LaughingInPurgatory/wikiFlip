@@ -15,5 +15,5 @@
     RewriteRule ^([a-z0-9]+(?:-[a-z0-9]+)*)/?$ index.php?slug=$1 [L,QSA]
 </IfModule>
 
-# Never gzip/deflate binary backup downloads (corrupts ZIP / triggers folder expand)
+# Never gzip/deflate binary backup downloads (would double-compress .tar.gz)
 SetEnvIf Request_URI "admin/export\.php$" no-gzip dont-vary

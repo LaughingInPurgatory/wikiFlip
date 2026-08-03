@@ -6,11 +6,13 @@ namespace WikiApp\Core;
 
 /**
  * Export / import the entire pages volume (markdown, media, order files, branding)
- * as a portable ZIP backup.
+ * as a portable tarball (.tar.gz).
  *
  * Archive layout:
  *   wikiflip-backup/manifest.json
  *   wikiflip-backup/pages/…          ← full pages tree (.site, content.md, media, .order.json)
+ *
+ * Import also accepts older .zip backups and bare pages/ trees inside archives.
  */
 final class ContentBackup
 {
@@ -22,19 +24,25 @@ final class ContentBackup
 
     public static function isAvailable(): bool
     {
-        return class_exists(\ZipArchive::class);
+        // PharData creates tar/tar.gz without needing ZipArchive
+        return class_exists(\PharData::class) || class_exists(\ZipArchive::class);
+    }
+
+    public static function canExport(): bool
+    {
+        return class_exists(\PharData::class);
     }
 
     /**
-     * Build a zip of the pages directory. Returns absolute path to a temp file.
+     * Build a .tar.gz of the pages directory. Returns absolute path to a temp file.
      * Caller must @unlink() after streaming.
      *
      * @throws \RuntimeException
      */
     public static function exportToTempFile(): string
     {
-        if (!self::isAvailable()) {
-            throw new \RuntimeException('ZipArchive is not available on this PHP install.');
+        if (!class_exists(\PharData::class)) {
+            throw new \RuntimeException('PHP PharData is not available (needed for tar.gz export).');
         }
 
         $pagesDir = rtrim(DatabaseManager::getPagesDir(), '/\\');
@@ -42,43 +50,63 @@ final class ContentBackup
             throw new \RuntimeException('Pages directory is missing.');
         }
 
-        $tmp = tempnam(sys_get_temp_dir(), 'wikiflip-export-');
-        if ($tmp === false) {
-            throw new \RuntimeException('Could not create temporary file.');
-        }
-        // tempnam creates a file; ZipArchive needs .zip path
-        $zipPath = $tmp . '.zip';
-        @unlink($tmp);
-
-        $zip = new \ZipArchive();
-        if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
-            throw new \RuntimeException('Could not create ZIP archive.');
+        $work = sys_get_temp_dir() . '/wikiflip-export-' . bin2hex(random_bytes(8));
+        if (!mkdir($work, 0700, true) && !is_dir($work)) {
+            throw new \RuntimeException('Could not create temporary export directory.');
         }
 
-        $rootPrefix = 'wikiflip-backup';
-        $manifest = [
-            'format' => self::FORMAT,
-            'version' => self::VERSION,
-            'exported_at' => gmdate('c'),
-            'site_title' => SiteSettings::siteTitle(),
-            'generator' => 'WikiFlip',
-        ];
-        $zip->addFromString(
-            $rootPrefix . '/manifest.json',
-            (string) json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n"
-        );
+        $tarPath = $work . '/backup.tar';
+        $gzPath = $tarPath . '.gz';
 
-        $pagesPrefix = $rootPrefix . '/pages';
-        self::addDirectoryToZip($zip, $pagesDir, $pagesPrefix);
+        try {
+            // PharData refuses to overwrite existing archives
+            if (is_file($tarPath)) {
+                @unlink($tarPath);
+            }
+            if (is_file($gzPath)) {
+                @unlink($gzPath);
+            }
 
-        $zip->close();
+            $phar = new \PharData($tarPath);
 
-        if (!is_file($zipPath) || filesize($zipPath) === 0) {
-            @unlink($zipPath);
-            throw new \RuntimeException('Export produced an empty archive.');
+            $rootPrefix = 'wikiflip-backup';
+            $manifest = [
+                'format' => self::FORMAT,
+                'version' => self::VERSION,
+                'exported_at' => gmdate('c'),
+                'site_title' => SiteSettings::siteTitle(),
+                'generator' => 'WikiFlip',
+                'archive' => 'tar.gz',
+            ];
+            $phar->addFromString(
+                $rootPrefix . '/manifest.json',
+                (string) json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n"
+            );
+
+            self::addDirectoryToPhar($phar, $pagesDir, $rootPrefix . '/pages');
+
+            // Compress to .tar.gz (creates backup.tar.gz alongside backup.tar)
+            $phar->compress(\Phar::GZ);
+            unset($phar);
+
+            // Drop the uncompressed .tar
+            @unlink($tarPath);
+
+            if (!is_file($gzPath) || filesize($gzPath) === 0) {
+                throw new \RuntimeException('Export produced an empty tarball.');
+            }
+
+            // Move out of work dir so we can delete the work folder
+            $final = sys_get_temp_dir() . '/wikiflip-export-' . bin2hex(random_bytes(6)) . '.tar.gz';
+            if (!@rename($gzPath, $final) && !@copy($gzPath, $final)) {
+                throw new \RuntimeException('Could not finalize export tarball.');
+            }
+            @unlink($gzPath);
+
+            return $final;
+        } finally {
+            self::removeTree($work);
         }
-
-        return $zipPath;
     }
 
     /**
@@ -90,47 +118,68 @@ final class ContentBackup
         $title = SiteSettings::siteTitle();
         $slug = preg_replace('/[^a-z0-9]+/i', '-', strtolower($title)) ?: 'wikiflip';
         $slug = trim((string) $slug, '-') ?: 'wikiflip';
-        return $slug . '-backup-' . $stamp . '.zip';
+        return $slug . '-backup-' . $stamp . '.tar.gz';
     }
 
     /**
-     * Import a backup ZIP into the pages directory.
+     * Import a backup archive (.tar.gz, .tar, or legacy .zip) into the pages directory.
      *
      * @param 'replace'|'merge' $mode
      * @return array{ok: bool, message: string, files?: int, mode?: string}
      */
-    public static function importFromZipFile(string $zipPath, string $mode = 'replace'): array
+    public static function importFromArchive(string $archivePath, string $mode = 'replace', ?string $originalName = null): array
     {
-        if (!self::isAvailable()) {
-            return ['ok' => false, 'message' => 'ZipArchive is not available on this PHP install.'];
-        }
-
         $mode = $mode === 'merge' ? 'merge' : 'replace';
 
-        if (!is_file($zipPath) || !is_readable($zipPath)) {
+        if (!is_file($archivePath) || !is_readable($archivePath)) {
             return ['ok' => false, 'message' => 'Uploaded file is not readable.'];
         }
 
-        $size = filesize($zipPath);
-        if ($size === false || $size < 22) {
-            return ['ok' => false, 'message' => 'Uploaded file is empty or not a valid ZIP.'];
+        $size = filesize($archivePath);
+        if ($size === false || $size < 20) {
+            return ['ok' => false, 'message' => 'Uploaded file is empty or too small to be a valid archive.'];
         }
         if ($size > self::MAX_IMPORT_BYTES) {
             $mb = (int) (self::MAX_IMPORT_BYTES / 1024 / 1024);
             return ['ok' => false, 'message' => "Archive is too large (max {$mb} MB)."];
         }
 
-        $zip = new \ZipArchive();
-        if ($zip->open($zipPath) !== true) {
-            return ['ok' => false, 'message' => 'Could not open ZIP archive. Is it a valid .zip file?'];
+        $kind = self::detectArchiveKind($archivePath, $originalName);
+        if ($kind === null) {
+            return ['ok' => false, 'message' => 'Unrecognized archive. Use a .tar.gz (or .tar / legacy .zip) WikiFlip backup.'];
         }
 
-        $pagesRootInZip = self::detectPagesRootInZip($zip);
-        if ($pagesRootInZip === null) {
+        if ($kind === 'zip') {
+            return self::importFromZipFile($archivePath, $mode);
+        }
+
+        return self::importFromTarFile($archivePath, $mode, $kind === 'tar.gz');
+    }
+
+    /**
+     * @deprecated use importFromArchive()
+     * @param 'replace'|'merge' $mode
+     * @return array{ok: bool, message: string, files?: int, mode?: string}
+     */
+    public static function importFromZipFile(string $zipPath, string $mode = 'replace'): array
+    {
+        if (!class_exists(\ZipArchive::class)) {
+            return ['ok' => false, 'message' => 'ZipArchive is not available to read legacy .zip backups.'];
+        }
+
+        $mode = $mode === 'merge' ? 'merge' : 'replace';
+
+        $zip = new \ZipArchive();
+        if ($zip->open($zipPath) !== true) {
+            return ['ok' => false, 'message' => 'Could not open ZIP archive.'];
+        }
+
+        $pagesRoot = self::detectPagesRootFromNames(self::listZipEntryNames($zip));
+        if ($pagesRoot === null) {
             $zip->close();
             return [
                 'ok' => false,
-                'message' => 'ZIP does not look like a WikiFlip content backup (no pages/content.md found).',
+                'message' => 'Archive does not look like a WikiFlip content backup (no pages/content.md found).',
             ];
         }
 
@@ -141,43 +190,11 @@ final class ContentBackup
         }
 
         try {
-            $fileCount = self::extractPagesEntries($zip, $pagesRootInZip, $extractDir);
+            $fileCount = self::extractZipPagesEntries($zip, $pagesRoot, $extractDir);
             $zip->close();
-
-            if ($fileCount === 0) {
-                return ['ok' => false, 'message' => 'Archive contained no extractable page files.'];
-            }
-
-            // Require at least one content.md
-            if (!self::directoryContainsContentMd($extractDir)) {
-                return ['ok' => false, 'message' => 'Archive has no content.md files after extraction.'];
-            }
-
-            $pagesDir = rtrim(DatabaseManager::getPagesDir(), '/\\');
-            if (!is_dir($pagesDir) && !mkdir($pagesDir, 0755, true) && !is_dir($pagesDir)) {
-                return ['ok' => false, 'message' => 'Pages directory is missing and could not be created.'];
-            }
-
-            if ($mode === 'replace') {
-                self::wipeDirectoryContents($pagesDir);
-            }
-
-            self::copyTree($extractDir, $pagesDir);
-            DatabaseManager::invalidateCache();
-            SiteSettings::clearCache();
-
-            return [
-                'ok' => true,
-                'message' => $mode === 'replace'
-                    ? "Import complete (replaced site). Restored {$fileCount} files."
-                    : "Import complete (merged). Applied {$fileCount} files.",
-                'files' => $fileCount,
-                'mode' => $mode,
-            ];
+            return self::applyExtractedPages($extractDir, $fileCount, $mode);
         } catch (\Throwable $e) {
-            if ($zip instanceof \ZipArchive) {
-                @$zip->close();
-            }
+            @$zip->close();
             return ['ok' => false, 'message' => 'Import failed: ' . $e->getMessage()];
         } finally {
             self::removeTree($extractDir);
@@ -185,12 +202,201 @@ final class ContentBackup
     }
 
     /**
-     * Add all files under $dir into the zip with $zipPrefix as path prefix.
+     * @param 'replace'|'merge' $mode
+     * @return array{ok: bool, message: string, files?: int, mode?: string}
      */
-    private static function addDirectoryToZip(\ZipArchive $zip, string $dir, string $zipPrefix): void
+    private static function importFromTarFile(string $path, string $mode, bool $gzipped): array
+    {
+        if (!class_exists(\PharData::class)) {
+            return ['ok' => false, 'message' => 'PHP PharData is not available to read tar backups.'];
+        }
+
+        $work = sys_get_temp_dir() . '/wikiflip-import-' . bin2hex(random_bytes(8));
+        if (!mkdir($work, 0700, true) && !is_dir($work)) {
+            return ['ok' => false, 'message' => 'Could not create temporary extract directory.'];
+        }
+
+        try {
+            $localArchive = $work . '/incoming' . ($gzipped ? '.tar.gz' : '.tar');
+            if (!@copy($path, $localArchive)) {
+                return ['ok' => false, 'message' => 'Could not stage uploaded archive.'];
+            }
+
+            $tarPath = $localArchive;
+            if ($gzipped) {
+                try {
+                    $gzPhar = new \PharData($localArchive);
+                    $gzPhar->decompress(); // creates incoming.tar next to .tar.gz
+                    unset($gzPhar);
+                } catch (\Throwable $e) {
+                    return ['ok' => false, 'message' => 'Could not decompress .tar.gz: ' . $e->getMessage()];
+                }
+                $tarPath = $work . '/incoming.tar';
+                if (!is_file($tarPath)) {
+                    return ['ok' => false, 'message' => 'Could not decompress .tar.gz archive.'];
+                }
+            }
+
+            $rawExtract = $work . '/raw';
+            if (!mkdir($rawExtract, 0755, true) && !is_dir($rawExtract)) {
+                return ['ok' => false, 'message' => 'Could not create extract target.'];
+            }
+
+            try {
+                $phar = new \PharData($tarPath);
+                $phar->extractTo($rawExtract, null, true);
+                unset($phar);
+            } catch (\Throwable $e) {
+                return ['ok' => false, 'message' => 'Could not extract tarball: ' . $e->getMessage()];
+            }
+
+            $pagesSource = self::findPagesRootOnDisk($rawExtract);
+            if ($pagesSource === null) {
+                return [
+                    'ok' => false,
+                    'message' => 'Archive does not look like a WikiFlip content backup (no pages/content.md found).',
+                ];
+            }
+
+            $fileCount = self::countFiles($pagesSource);
+            return self::applyExtractedPages($pagesSource, $fileCount, $mode);
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'message' => 'Import failed: ' . $e->getMessage()];
+        } finally {
+            self::removeTree($work);
+        }
+    }
+
+    /**
+     * Locate the pages tree root after full extract (…/pages with content.md, or bare tree).
+     */
+    private static function findPagesRootOnDisk(string $extractRoot): ?string
+    {
+        $extractRoot = rtrim(str_replace('\\', '/', $extractRoot), '/');
+
+        // Preferred: any …/pages directory that contains content.md somewhere under it
+        $candidates = [];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($extractRoot, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $fileInfo) {
+            /** @var \SplFileInfo $fileInfo */
+            if (!$fileInfo->isDir()) {
+                continue;
+            }
+            if ($fileInfo->getFilename() !== 'pages') {
+                continue;
+            }
+            $path = str_replace('\\', '/', $fileInfo->getPathname());
+            if (self::directoryContainsContentMd($path)) {
+                $candidates[] = $path;
+            }
+        }
+        if ($candidates !== []) {
+            // Prefer deeper paths? Usually one. Take first.
+            usort($candidates, static fn(string $a, string $b): int => strlen($a) <=> strlen($b));
+            return $candidates[0];
+        }
+
+        // Bare archive: extract root itself is the pages tree
+        if (self::directoryContainsContentMd($extractRoot)) {
+            return $extractRoot;
+        }
+
+        // Single top-level folder (e.g. wikiflip-backup without pages/ name)
+        foreach (scandir($extractRoot) ?: [] as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $child = $extractRoot . '/' . $name;
+            if (is_dir($child) && self::directoryContainsContentMd($child) && !is_dir($child . '/pages')) {
+                // only if it looks like pages (has home/ or any content.md)
+                return $child;
+            }
+        }
+
+        return null;
+    }
+
+    private static function countFiles(string $dir): int
+    {
+        $n = 0;
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($iterator as $fileInfo) {
+            /** @var \SplFileInfo $fileInfo */
+            if ($fileInfo->isFile()) {
+                $n++;
+            }
+        }
+        return $n;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function listZipEntryNames(\ZipArchive $zip): array
+    {
+        $names = [];
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = str_replace('\\', '/', (string) $zip->getNameIndex($i));
+            $name = ltrim($name, '/');
+            if ($name !== '' && !str_ends_with($name, '/')) {
+                $names[] = $name;
+            }
+        }
+        return $names;
+    }
+
+    private static function detectArchiveKind(string $path, ?string $originalName): ?string
+    {
+        $name = strtolower((string) ($originalName ?? basename($path)));
+        if (str_ends_with($name, '.tar.gz') || str_ends_with($name, '.tgz')) {
+            return 'tar.gz';
+        }
+        if (str_ends_with($name, '.tar')) {
+            return 'tar';
+        }
+        if (str_ends_with($name, '.zip')) {
+            return 'zip';
+        }
+
+        $fh = fopen($path, 'rb');
+        if ($fh === false) {
+            return null;
+        }
+        $magic = fread($fh, 4);
+        fclose($fh);
+        if ($magic === false) {
+            return null;
+        }
+        // gzip
+        if (str_starts_with($magic, "\x1f\x8b")) {
+            return 'tar.gz';
+        }
+        // zip
+        if (str_starts_with($magic, 'PK')) {
+            return 'zip';
+        }
+        // ustar tar often has "ustar" at offset 257 — check loosely
+        $fh = fopen($path, 'rb');
+        if ($fh !== false) {
+            fseek($fh, 257);
+            $ustar = fread($fh, 5);
+            fclose($fh);
+            if ($ustar === 'ustar') {
+                return 'tar';
+            }
+        }
+        return null;
+    }
+
+    private static function addDirectoryToPhar(\PharData $phar, string $dir, string $prefix): void
     {
         $dir = rtrim(str_replace('\\', '/', $dir), '/');
-        $zipPrefix = rtrim(str_replace('\\', '/', $zipPrefix), '/');
+        $prefix = rtrim(str_replace('\\', '/', $prefix), '/');
 
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
@@ -204,46 +410,39 @@ final class ContentBackup
             if ($rel === false || $rel === '') {
                 continue;
             }
-            // Skip junk
-            if (str_contains($rel, '/.DS_Store') || str_ends_with($rel, '/.DS_Store') || $rel === '.DS_Store') {
+            if ($rel === '.DS_Store' || str_ends_with($rel, '/.DS_Store')) {
                 continue;
             }
-
-            $entry = $zipPrefix . '/' . $rel;
+            $entry = $prefix . '/' . $rel;
             if ($fileInfo->isDir()) {
-                $zip->addEmptyDir($entry);
-            } elseif ($fileInfo->isFile() && $fileInfo->isReadable()) {
-                $zip->addFile($path, $entry);
+                // PharData creates parent dirs when adding files
+                continue;
+            }
+            if ($fileInfo->isFile() && $fileInfo->isReadable()) {
+                $phar->addFile($path, $entry);
             }
         }
     }
 
     /**
-     * Find the pages root path prefix inside the zip (with trailing semantics as used in entry names).
-     * Returns "" if zip root IS the pages tree, "pages" if pages/ at root, "wikiflip-backup/pages", etc.
+     * @param list<string> $names archive-relative file paths
      */
-    private static function detectPagesRootInZip(\ZipArchive $zip): ?string
+    private static function detectPagesRootFromNames(array $names): ?string
     {
         $candidates = [];
 
-        for ($i = 0; $i < $zip->numFiles; $i++) {
-            $name = str_replace('\\', '/', (string) $zip->getNameIndex($i));
-            $name = ltrim($name, '/');
-            if ($name === '' || str_ends_with($name, '/')) {
-                continue;
-            }
-            if (str_contains($name, '..')) {
+        foreach ($names as $name) {
+            $name = ltrim(str_replace('\\', '/', $name), '/');
+            if ($name === '' || str_contains($name, '..')) {
                 continue;
             }
 
-            // Prefer …/pages/…/content.md
-            if (preg_match('#^(?:(.+)/)?pages/(.+/)?content\.md$#', $name, $m)) {
+            if (preg_match('#^(?:(.+)/)?pages/(?:.+/)?content\.md$#', $name, $m)) {
                 $prefix = isset($m[1]) && $m[1] !== '' ? $m[1] . '/pages' : 'pages';
                 $candidates[$prefix] = ($candidates[$prefix] ?? 0) + 1;
                 continue;
             }
 
-            // Bare tree: home/content.md at archive root
             if (preg_match('#^([^/]+)/content\.md$#', $name) || $name === 'content.md') {
                 $candidates[''] = ($candidates[''] ?? 0) + 1;
             }
@@ -253,7 +452,6 @@ final class ContentBackup
             return null;
         }
 
-        // Prefer explicit pages/ roots with most content.md hits
         arsort($candidates);
         foreach (array_keys($candidates) as $prefix) {
             if ($prefix !== '' && str_ends_with($prefix, 'pages')) {
@@ -264,12 +462,7 @@ final class ContentBackup
         return array_key_first($candidates);
     }
 
-    /**
-     * Extract only entries under the detected pages root into $destDir (flattened to pages contents).
-     *
-     * @return int number of files written
-     */
-    private static function extractPagesEntries(\ZipArchive $zip, string $pagesRootInZip, string $destDir): int
+    private static function extractZipPagesEntries(\ZipArchive $zip, string $pagesRootInZip, string $destDir): int
     {
         $destDir = rtrim(str_replace('\\', '/', $destDir), '/');
         $prefix = $pagesRootInZip === '' ? '' : rtrim(str_replace('\\', '/', $pagesRootInZip), '/') . '/';
@@ -291,7 +484,6 @@ final class ContentBackup
                 }
                 $rel = substr($name, strlen($prefix));
             } else {
-                // Skip manifest at root of bare archives
                 if ($name === 'manifest.json') {
                     continue;
                 }
@@ -301,7 +493,6 @@ final class ContentBackup
             if ($rel === false || $rel === '' || str_contains($rel, '..')) {
                 continue;
             }
-            // Skip macOS resource forks
             if (str_starts_with($rel, '__MACOSX/') || str_contains($rel, '/__MACOSX/')) {
                 continue;
             }
@@ -334,6 +525,43 @@ final class ContentBackup
         return $count;
     }
 
+    /**
+     * @param 'replace'|'merge' $mode
+     * @return array{ok: bool, message: string, files?: int, mode?: string}
+     */
+    private static function applyExtractedPages(string $extractDir, int $fileCount, string $mode): array
+    {
+        if ($fileCount === 0) {
+            return ['ok' => false, 'message' => 'Archive contained no extractable page files.'];
+        }
+
+        if (!self::directoryContainsContentMd($extractDir)) {
+            return ['ok' => false, 'message' => 'Archive has no content.md files after extraction.'];
+        }
+
+        $pagesDir = rtrim(DatabaseManager::getPagesDir(), '/\\');
+        if (!is_dir($pagesDir) && !mkdir($pagesDir, 0755, true) && !is_dir($pagesDir)) {
+            return ['ok' => false, 'message' => 'Pages directory is missing and could not be created.'];
+        }
+
+        if ($mode === 'replace') {
+            self::wipeDirectoryContents($pagesDir);
+        }
+
+        self::copyTree($extractDir, $pagesDir);
+        DatabaseManager::invalidateCache();
+        SiteSettings::clearCache();
+
+        return [
+            'ok' => true,
+            'message' => $mode === 'replace'
+                ? "Import complete (replaced site). Restored {$fileCount} files."
+                : "Import complete (merged). Applied {$fileCount} files.",
+            'files' => $fileCount,
+            'mode' => $mode,
+        ];
+    }
+
     private static function directoryContainsContentMd(string $dir): bool
     {
         $iterator = new \RecursiveIteratorIterator(
@@ -348,7 +576,6 @@ final class ContentBackup
         return false;
     }
 
-    /** Delete everything inside $dir but keep $dir itself (volume mount friendly). */
     private static function wipeDirectoryContents(string $dir): void
     {
         $dir = rtrim(str_replace('\\', '/', $dir), '/');

@@ -1,14 +1,12 @@
 <?php
 /**
- * Download a ZIP of all wiki content (pages, media, order, branding).
+ * Download a .tar.gz of all wiki content (pages, media, order, branding).
  *
- * Binary-safe: disables zlib/mod_deflate compression so the file stays a real .zip
- * (compressed bodies are often saved/auto-expanded as folders by browsers/OS).
+ * Binary-safe: disables zlib/mod_deflate so the tarball is not double-compressed.
  */
 
 declare(strict_types=1);
 
-// Must run before any output or bootstrap side-effects that buffer
 @ini_set('zlib.output_compression', '0');
 if (function_exists('apache_setenv')) {
     @apache_setenv('no-gzip', '1');
@@ -32,15 +30,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 Auth::requireCsrf();
 
-if (!ContentBackup::isAvailable()) {
+if (!ContentBackup::canExport()) {
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
-    echo 'ZIP support (PHP ZipArchive) is not enabled on this server.';
+    echo 'Tarball export is not available (PHP PharData required).';
     exit;
 }
 
 try {
-    $zipPath = ContentBackup::exportToTempFile();
+    $archivePath = ContentBackup::exportToTempFile();
 } catch (Throwable $e) {
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
@@ -49,53 +47,47 @@ try {
 }
 
 $filename = ContentBackup::downloadFilename();
-// Always force .zip extension
-if (!str_ends_with(strtolower($filename), '.zip')) {
-    $filename .= '.zip';
+if (!str_ends_with(strtolower($filename), '.tar.gz')) {
+    $filename = preg_replace('/\.(zip|tar)$/i', '', $filename) . '.tar.gz';
 }
 
-$size = filesize($zipPath);
-if ($size === false || $size < 22) {
-    @unlink($zipPath);
+$size = filesize($archivePath);
+if ($size === false || $size < 20) {
+    @unlink($archivePath);
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
-    echo 'Export produced an empty or invalid ZIP.';
+    echo 'Export produced an empty or invalid tarball.';
     exit;
 }
 
-// Verify local file is a real ZIP (PK signature)
-$fh = fopen($zipPath, 'rb');
+// gzip magic 1f 8b
+$fh = fopen($archivePath, 'rb');
 if ($fh === false) {
-    @unlink($zipPath);
+    @unlink($archivePath);
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
     echo 'Could not read export file.';
     exit;
 }
-$magic = fread($fh, 4);
-if ($magic === false || !str_starts_with($magic, "PK")) {
+$magic = fread($fh, 2);
+if ($magic === false || $magic !== "\x1f\x8b") {
     fclose($fh);
-    @unlink($zipPath);
+    @unlink($archivePath);
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
-    echo 'Export file is not a valid ZIP archive.';
+    echo 'Export file is not a valid gzip tarball.';
     exit;
 }
 rewind($fh);
 
-// Drop any buffers so the raw ZIP bytes are not re-compressed/mangled
 while (ob_get_level() > 0) {
     ob_end_clean();
 }
 @ini_set('zlib.output_compression', '0');
 
-// Force a saved .zip file (not an auto-expanded folder):
-// - application/octet-stream avoids Safari/macOS “Open safe files” unpacking
-// - filename / filename* always end in .zip
-// - no Content-Encoding so zlib/mod_deflate cannot rewrite the body
-$safeAscii = preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename) ?: 'wikiflip-backup.zip';
-if (!str_ends_with(strtolower($safeAscii), '.zip')) {
-    $safeAscii .= '.zip';
+$safeAscii = preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename) ?: 'wikiflip-backup.tar.gz';
+if (!str_ends_with(strtolower($safeAscii), '.tar.gz')) {
+    $safeAscii = rtrim($safeAscii, '.') . '.tar.gz';
 }
 $disposition = 'attachment; filename="' . $safeAscii . '"; filename*=UTF-8\'\'' . rawurlencode($filename);
 
@@ -110,8 +102,7 @@ header('Expires: 0');
 header('X-Content-Type-Options: nosniff');
 header('X-Accel-Buffering: no');
 
-// Stream binary
 fpassthru($fh);
 fclose($fh);
-@unlink($zipPath);
+@unlink($archivePath);
 exit;

@@ -89,13 +89,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mode = $mode === 'merge' ? 'merge' : 'replace';
 
         if (!ContentBackup::isAvailable()) {
-            $flash = 'Archive support is not available on this server (need PHP PharData and/or ZipArchive).';
+            $flash = 'Archive support is not available on this server (need PHP ZipArchive).';
             $flashOk = false;
         } elseif (empty($_FILES['backup_file']['tmp_name']) || !is_uploaded_file((string) $_FILES['backup_file']['tmp_name'])) {
             $err = (int) ($_FILES['backup_file']['error'] ?? UPLOAD_ERR_NO_FILE);
             $flash = match ($err) {
                 UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'Upload too large (max ~100 MB for full-site backups).',
-                UPLOAD_ERR_NO_FILE => 'Choose a .tar.gz backup file to import.',
+                UPLOAD_ERR_NO_FILE => 'Choose a .zip backup file to import.',
                 default => 'Upload failed (error code ' . $err . ').',
             };
             $flashOk = false;
@@ -103,12 +103,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $tmp = (string) $_FILES['backup_file']['tmp_name'];
             $name = (string) ($_FILES['backup_file']['name'] ?? '');
             $lower = strtolower($name);
-            $okName = str_ends_with($lower, '.tar.gz')
+            $okName = str_ends_with($lower, '.zip')
+                || str_ends_with($lower, '.tar.gz')
                 || str_ends_with($lower, '.tgz')
-                || str_ends_with($lower, '.tar')
-                || str_ends_with($lower, '.zip');
+                || str_ends_with($lower, '.tar');
             if (!$okName) {
-                $flash = 'Please upload a .tar.gz (or .tar / legacy .zip) backup from WikiFlip.';
+                $flash = 'Please upload a .zip backup from WikiFlip (or .tar.gz from an older export).';
                 $flashOk = false;
             } else {
                 $result = ContentBackup::importFromArchive($tmp, $mode, $name);
@@ -281,28 +281,29 @@ require __DIR__ . '/../src/includes/header.php';
         <div class="admin-tab-panel" role="tabpanel" aria-labelledby="tab-backup" id="panel-backup">
             <?php if (!ContentBackup::canExport()): ?>
                 <div class="save-status is-error" role="alert">
-                    PHP PharData is not available — tarball export is disabled on this server.
+                    PHP ZipArchive is not available — export is disabled on this server.
                 </div>
             <?php endif; ?>
 
             <h3 class="admin-section-title">Export</h3>
             <p class="hint admin-hint">
-                Download a <strong>.tar.gz tarball</strong> of the entire content volume: all pages, nested categories,
-                media files, sidebar order, and branding (logo, title, custom CSS under <code>pages/.site</code>).
-                Your browser should save something like <code>wikiflip-backup-YYYYMMDD-HHMMSS.tar.gz</code>.
+                Download a <strong>.zip file</strong> of the entire content volume: pages, media, sidebar order,
+                and branding under <code>pages/.site</code>.
+                The file is prepared server-side then downloaded via a one-time link so the browser saves
+                <code>…-backup-YYYYMMDD-HHMMSS.zip</code> (not an unpacked folder).
             </p>
             <form method="post" action="<?= e(url('admin/export.php')) ?>" class="backup-export-form">
                 <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary" <?= ContentBackup::canExport() ? '' : 'disabled' ?>>
-                        Download backup .tar.gz
+                        Download backup .zip
                     </button>
                 </div>
             </form>
 
             <h3 class="admin-section-title">Import</h3>
             <p class="hint admin-hint">
-                Restore from a WikiFlip <code>.tar.gz</code> backup (also accepts <code>.tar</code> or legacy <code>.zip</code>).
+                Restore from a WikiFlip <code>.zip</code> backup (also accepts older <code>.tar.gz</code> exports).
                 <strong>Replace</strong> wipes current content first; <strong>Merge</strong> overwrites matching paths and keeps the rest.
                 Max size ~100&nbsp;MB.
             </p>
@@ -312,9 +313,9 @@ require __DIR__ . '/../src/includes/header.php';
                 <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
 
                 <div class="form-group">
-                    <label for="backup_file">Backup file (.tar.gz)</label>
+                    <label for="backup_file">Backup file (.zip)</label>
                     <input type="file" id="backup_file" name="backup_file"
-                           accept=".tar.gz,.tgz,.tar,.zip,application/gzip,application/x-tar,application/zip"
+                           accept=".zip,.tar.gz,.tgz,.tar,application/zip,application/gzip,application/x-tar"
                            <?= ContentBackup::isAvailable() ? 'required' : 'disabled' ?>>
                 </div>
 

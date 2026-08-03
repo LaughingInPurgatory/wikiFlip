@@ -6,13 +6,13 @@ namespace WikiApp\Core;
 
 /**
  * Export / import the entire pages volume (markdown, media, order files, branding)
- * as a portable tarball (.tar.gz).
+ * as a portable ZIP backup.
  *
  * Archive layout:
  *   wikiflip-backup/manifest.json
  *   wikiflip-backup/pages/…          ← full pages tree (.site, content.md, media, .order.json)
  *
- * Import also accepts older .zip backups and bare pages/ trees inside archives.
+ * Import also accepts .tar.gz / .tar from older builds.
  */
 final class ContentBackup
 {
@@ -22,27 +22,28 @@ final class ContentBackup
     /** Soft limit on import archive size (bytes). */
     public const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 
+    private const SESSION_EXPORT_KEY = 'wikiflip_pending_export';
+
     public static function isAvailable(): bool
     {
-        // PharData creates tar/tar.gz without needing ZipArchive
-        return class_exists(\PharData::class) || class_exists(\ZipArchive::class);
+        return class_exists(\ZipArchive::class) || class_exists(\PharData::class);
     }
 
     public static function canExport(): bool
     {
-        return class_exists(\PharData::class);
+        return class_exists(\ZipArchive::class);
     }
 
     /**
-     * Build a .tar.gz of the pages directory. Returns absolute path to a temp file.
-     * Caller must @unlink() after streaming.
+     * Build a ZIP of the pages directory. Returns absolute path to a temp file.
+     * Caller must @unlink() after streaming (or use prepareDownload / takePendingDownload).
      *
      * @throws \RuntimeException
      */
     public static function exportToTempFile(): string
     {
-        if (!class_exists(\PharData::class)) {
-            throw new \RuntimeException('PHP PharData is not available (needed for tar.gz export).');
+        if (!class_exists(\ZipArchive::class)) {
+            throw new \RuntimeException('PHP ZipArchive is not available.');
         }
 
         $pagesDir = rtrim(DatabaseManager::getPagesDir(), '/\\');
@@ -50,67 +51,64 @@ final class ContentBackup
             throw new \RuntimeException('Pages directory is missing.');
         }
 
-        $work = sys_get_temp_dir() . '/wikiflip-export-' . bin2hex(random_bytes(8));
-        if (!mkdir($work, 0700, true) && !is_dir($work)) {
-            throw new \RuntimeException('Could not create temporary export directory.');
+        $tmp = tempnam(sys_get_temp_dir(), 'wikiflip-export-');
+        if ($tmp === false) {
+            throw new \RuntimeException('Could not create temporary file.');
+        }
+        $zipPath = $tmp . '.zip';
+        @unlink($tmp);
+
+        $zip = new \ZipArchive();
+        $flags = \ZipArchive::CREATE | \ZipArchive::OVERWRITE;
+        if ($zip->open($zipPath, $flags) !== true) {
+            throw new \RuntimeException('Could not create ZIP archive.');
         }
 
-        $tarPath = $work . '/backup.tar';
-        $gzPath = $tarPath . '.gz';
+        $rootPrefix = 'wikiflip-backup';
+        $manifest = [
+            'format' => self::FORMAT,
+            'version' => self::VERSION,
+            'exported_at' => gmdate('c'),
+            'site_title' => SiteSettings::siteTitle(),
+            'generator' => 'WikiFlip',
+            'archive' => 'zip',
+        ];
+        $zip->addFromString(
+            $rootPrefix . '/manifest.json',
+            (string) json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n"
+        );
 
-        try {
-            // PharData refuses to overwrite existing archives
-            if (is_file($tarPath)) {
-                @unlink($tarPath);
-            }
-            if (is_file($gzPath)) {
-                @unlink($gzPath);
-            }
+        self::addDirectoryToZip($zip, $pagesDir, $rootPrefix . '/pages');
 
-            $phar = new \PharData($tarPath);
-
-            $rootPrefix = 'wikiflip-backup';
-            $manifest = [
-                'format' => self::FORMAT,
-                'version' => self::VERSION,
-                'exported_at' => gmdate('c'),
-                'site_title' => SiteSettings::siteTitle(),
-                'generator' => 'WikiFlip',
-                'archive' => 'tar.gz',
-            ];
-            $phar->addFromString(
-                $rootPrefix . '/manifest.json',
-                (string) json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n"
-            );
-
-            self::addDirectoryToPhar($phar, $pagesDir, $rootPrefix . '/pages');
-
-            // Compress to .tar.gz (creates backup.tar.gz alongside backup.tar)
-            $phar->compress(\Phar::GZ);
-            unset($phar);
-
-            // Drop the uncompressed .tar
-            @unlink($tarPath);
-
-            if (!is_file($gzPath) || filesize($gzPath) === 0) {
-                throw new \RuntimeException('Export produced an empty tarball.');
-            }
-
-            // Move out of work dir so we can delete the work folder
-            $final = sys_get_temp_dir() . '/wikiflip-export-' . bin2hex(random_bytes(6)) . '.tar.gz';
-            if (!@rename($gzPath, $final) && !@copy($gzPath, $final)) {
-                throw new \RuntimeException('Could not finalize export tarball.');
-            }
-            @unlink($gzPath);
-
-            return $final;
-        } finally {
-            self::removeTree($work);
+        // Prefer stored/deflated entries; close flushes central directory
+        if (!$zip->close()) {
+            @unlink($zipPath);
+            throw new \RuntimeException('Failed to finalize ZIP archive.');
         }
+
+        if (!is_file($zipPath) || filesize($zipPath) < 22) {
+            @unlink($zipPath);
+            throw new \RuntimeException('Export produced an empty archive.');
+        }
+
+        // Verify local PK signature
+        $fh = fopen($zipPath, 'rb');
+        if ($fh === false) {
+            @unlink($zipPath);
+            throw new \RuntimeException('Could not re-open export ZIP.');
+        }
+        $magic = fread($fh, 2);
+        fclose($fh);
+        if ($magic !== 'PK') {
+            @unlink($zipPath);
+            throw new \RuntimeException('Export file is not a valid ZIP.');
+        }
+
+        return $zipPath;
     }
 
     /**
-     * Suggested download filename for the browser.
+     * Suggested download filename (ASCII-safe .zip).
      */
     public static function downloadFilename(): string
     {
@@ -118,11 +116,144 @@ final class ContentBackup
         $title = SiteSettings::siteTitle();
         $slug = preg_replace('/[^a-z0-9]+/i', '-', strtolower($title)) ?: 'wikiflip';
         $slug = trim((string) $slug, '-') ?: 'wikiflip';
-        return $slug . '-backup-' . $stamp . '.tar.gz';
+        // Keep name simple for Safari / Windows
+        return $slug . '-backup-' . $stamp . '.zip';
     }
 
     /**
-     * Import a backup archive (.tar.gz, .tar, or legacy .zip) into the pages directory.
+     * Build a ZIP and stash a one-time download token in the session.
+     * Browser then GETs export.php?download=TOKEN so the file is a normal attachment.
+     *
+     * @return string opaque token
+     * @throws \RuntimeException
+     */
+    public static function prepareDownload(): string
+    {
+        Auth::startSession();
+        // Drop any previous pending export first
+        self::discardPendingDownload();
+
+        $path = self::exportToTempFile();
+        $token = bin2hex(random_bytes(16));
+        $filename = self::downloadFilename();
+
+        $_SESSION[self::SESSION_EXPORT_KEY] = [
+            'token' => $token,
+            'path' => $path,
+            'filename' => $filename,
+            'created' => time(),
+        ];
+
+        return $token;
+    }
+
+    /**
+     * Consume a one-time download token. Returns [path, filename] or null.
+     *
+     * @return array{path: string, filename: string}|null
+     */
+    public static function takePendingDownload(string $token): ?array
+    {
+        Auth::startSession();
+        $pending = $_SESSION[self::SESSION_EXPORT_KEY] ?? null;
+        unset($_SESSION[self::SESSION_EXPORT_KEY]);
+
+        if (!is_array($pending)) {
+            return null;
+        }
+
+        $expected = (string) ($pending['token'] ?? '');
+        $path = (string) ($pending['path'] ?? '');
+        $filename = (string) ($pending['filename'] ?? 'wikiflip-backup.zip');
+        $created = (int) ($pending['created'] ?? 0);
+
+        // 10-minute one-shot
+        if ($expected === '' || !hash_equals($expected, $token) || $created < time() - 600) {
+            if ($path !== '' && is_file($path)) {
+                @unlink($path);
+            }
+            return null;
+        }
+
+        if ($path === '' || !is_file($path)) {
+            return null;
+        }
+
+        if (!str_ends_with(strtolower($filename), '.zip')) {
+            $filename .= '.zip';
+        }
+
+        return ['path' => $path, 'filename' => $filename];
+    }
+
+    public static function discardPendingDownload(): void
+    {
+        Auth::startSession();
+        $pending = $_SESSION[self::SESSION_EXPORT_KEY] ?? null;
+        unset($_SESSION[self::SESSION_EXPORT_KEY]);
+        if (is_array($pending)) {
+            $path = (string) ($pending['path'] ?? '');
+            if ($path !== '' && is_file($path)) {
+                @unlink($path);
+            }
+        }
+    }
+
+    /**
+     * Stream a local ZIP to the client with headers that keep it a .zip file
+     * (not auto-expanded into a folder by Safari when possible).
+     */
+    public static function streamZipFile(string $path, string $filename): never
+    {
+        @ini_set('zlib.output_compression', '0');
+        if (function_exists('apache_setenv')) {
+            @apache_setenv('no-gzip', '1');
+        }
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        $size = filesize($path);
+        if ($size === false || $size < 22) {
+            @unlink($path);
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Export file missing or empty.';
+            exit;
+        }
+
+        $safe = preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename) ?: 'wikiflip-backup.zip';
+        if (!str_ends_with(strtolower($safe), '.zip')) {
+            $safe .= '.zip';
+        }
+
+        // application/octet-stream + attachment reduces Safari “Open safe files” auto-unzip
+        header('Content-Type: application/octet-stream');
+        header('Content-Transfer-Encoding: binary');
+        header('Content-Length: ' . (string) $size);
+        header('Content-Disposition: attachment; filename="' . $safe . '"');
+        header('Content-Description: File Transfer');
+        header('Cache-Control: no-store, no-cache, must-revalidate, private');
+        header('Pragma: public');
+        header('Expires: 0');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Accel-Buffering: no');
+        // Hint that this is a download, not a navigable document
+        header('X-Download-Options: noopen');
+
+        $sent = readfile($path);
+        @unlink($path);
+
+        if ($sent === false) {
+            // Headers may already be sent; best-effort
+            exit;
+        }
+        exit;
+    }
+
+    /**
+     * Import a backup archive (.zip preferred; .tar.gz / .tar also supported).
      *
      * @param 'replace'|'merge' $mode
      * @return array{ok: bool, message: string, files?: int, mode?: string}
@@ -146,7 +277,7 @@ final class ContentBackup
 
         $kind = self::detectArchiveKind($archivePath, $originalName);
         if ($kind === null) {
-            return ['ok' => false, 'message' => 'Unrecognized archive. Use a .tar.gz (or .tar / legacy .zip) WikiFlip backup.'];
+            return ['ok' => false, 'message' => 'Unrecognized archive. Use a .zip WikiFlip backup (or .tar.gz).'];
         }
 
         if ($kind === 'zip') {
@@ -157,21 +288,20 @@ final class ContentBackup
     }
 
     /**
-     * @deprecated use importFromArchive()
      * @param 'replace'|'merge' $mode
      * @return array{ok: bool, message: string, files?: int, mode?: string}
      */
     public static function importFromZipFile(string $zipPath, string $mode = 'replace'): array
     {
         if (!class_exists(\ZipArchive::class)) {
-            return ['ok' => false, 'message' => 'ZipArchive is not available to read legacy .zip backups.'];
+            return ['ok' => false, 'message' => 'ZipArchive is not available.'];
         }
 
         $mode = $mode === 'merge' ? 'merge' : 'replace';
 
         $zip = new \ZipArchive();
         if ($zip->open($zipPath) !== true) {
-            return ['ok' => false, 'message' => 'Could not open ZIP archive.'];
+            return ['ok' => false, 'message' => 'Could not open ZIP archive. Is it a valid .zip file?'];
         }
 
         $pagesRoot = self::detectPagesRootFromNames(self::listZipEntryNames($zip));
@@ -226,7 +356,7 @@ final class ContentBackup
             if ($gzipped) {
                 try {
                     $gzPhar = new \PharData($localArchive);
-                    $gzPhar->decompress(); // creates incoming.tar next to .tar.gz
+                    $gzPhar->decompress();
                     unset($gzPhar);
                 } catch (\Throwable $e) {
                     return ['ok' => false, 'message' => 'Could not decompress .tar.gz: ' . $e->getMessage()];
@@ -258,8 +388,7 @@ final class ContentBackup
                 ];
             }
 
-            $fileCount = self::countFiles($pagesSource);
-            return self::applyExtractedPages($pagesSource, $fileCount, $mode);
+            return self::applyExtractedPages($pagesSource, self::countFiles($pagesSource), $mode);
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => 'Import failed: ' . $e->getMessage()];
         } finally {
@@ -267,14 +396,10 @@ final class ContentBackup
         }
     }
 
-    /**
-     * Locate the pages tree root after full extract (…/pages with content.md, or bare tree).
-     */
     private static function findPagesRootOnDisk(string $extractRoot): ?string
     {
         $extractRoot = rtrim(str_replace('\\', '/', $extractRoot), '/');
 
-        // Preferred: any …/pages directory that contains content.md somewhere under it
         $candidates = [];
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($extractRoot, \FilesystemIterator::SKIP_DOTS),
@@ -282,38 +407,20 @@ final class ContentBackup
         );
         foreach ($iterator as $fileInfo) {
             /** @var \SplFileInfo $fileInfo */
-            if (!$fileInfo->isDir()) {
-                continue;
-            }
-            if ($fileInfo->getFilename() !== 'pages') {
-                continue;
-            }
-            $path = str_replace('\\', '/', $fileInfo->getPathname());
-            if (self::directoryContainsContentMd($path)) {
-                $candidates[] = $path;
+            if ($fileInfo->isDir() && $fileInfo->getFilename() === 'pages') {
+                $path = str_replace('\\', '/', $fileInfo->getPathname());
+                if (self::directoryContainsContentMd($path)) {
+                    $candidates[] = $path;
+                }
             }
         }
         if ($candidates !== []) {
-            // Prefer deeper paths? Usually one. Take first.
             usort($candidates, static fn(string $a, string $b): int => strlen($a) <=> strlen($b));
             return $candidates[0];
         }
 
-        // Bare archive: extract root itself is the pages tree
         if (self::directoryContainsContentMd($extractRoot)) {
             return $extractRoot;
-        }
-
-        // Single top-level folder (e.g. wikiflip-backup without pages/ name)
-        foreach (scandir($extractRoot) ?: [] as $name) {
-            if ($name === '.' || $name === '..') {
-                continue;
-            }
-            $child = $extractRoot . '/' . $name;
-            if (is_dir($child) && self::directoryContainsContentMd($child) && !is_dir($child . '/pages')) {
-                // only if it looks like pages (has home/ or any content.md)
-                return $child;
-            }
         }
 
         return null;
@@ -332,22 +439,6 @@ final class ContentBackup
             }
         }
         return $n;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function listZipEntryNames(\ZipArchive $zip): array
-    {
-        $names = [];
-        for ($i = 0; $i < $zip->numFiles; $i++) {
-            $name = str_replace('\\', '/', (string) $zip->getNameIndex($i));
-            $name = ltrim($name, '/');
-            if ($name !== '' && !str_ends_with($name, '/')) {
-                $names[] = $name;
-            }
-        }
-        return $names;
     }
 
     private static function detectArchiveKind(string $path, ?string $originalName): ?string
@@ -372,15 +463,12 @@ final class ContentBackup
         if ($magic === false) {
             return null;
         }
-        // gzip
         if (str_starts_with($magic, "\x1f\x8b")) {
             return 'tar.gz';
         }
-        // zip
         if (str_starts_with($magic, 'PK')) {
             return 'zip';
         }
-        // ustar tar often has "ustar" at offset 257 — check loosely
         $fh = fopen($path, 'rb');
         if ($fh !== false) {
             fseek($fh, 257);
@@ -393,10 +481,10 @@ final class ContentBackup
         return null;
     }
 
-    private static function addDirectoryToPhar(\PharData $phar, string $dir, string $prefix): void
+    private static function addDirectoryToZip(\ZipArchive $zip, string $dir, string $zipPrefix): void
     {
         $dir = rtrim(str_replace('\\', '/', $dir), '/');
-        $prefix = rtrim(str_replace('\\', '/', $prefix), '/');
+        $zipPrefix = rtrim(str_replace('\\', '/', $zipPrefix), '/');
 
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
@@ -413,19 +501,43 @@ final class ContentBackup
             if ($rel === '.DS_Store' || str_ends_with($rel, '/.DS_Store')) {
                 continue;
             }
-            $entry = $prefix . '/' . $rel;
+
+            $entry = $zipPrefix . '/' . $rel;
             if ($fileInfo->isDir()) {
-                // PharData creates parent dirs when adding files
-                continue;
-            }
-            if ($fileInfo->isFile() && $fileInfo->isReadable()) {
-                $phar->addFile($path, $entry);
+                $zip->addEmptyDir($entry);
+            } elseif ($fileInfo->isFile() && $fileInfo->isReadable()) {
+                // ZipArchive::FL_ENC_UTF_8 when available keeps paths clean
+                if (defined('ZipArchive::FL_ENC_UTF_8')) {
+                    $zip->addFile($path, $entry);
+                    $idx = $zip->locateName($entry);
+                    if ($idx !== false) {
+                        $zip->setCompressionName($entry, \ZipArchive::CM_DEFLATE);
+                    }
+                } else {
+                    $zip->addFile($path, $entry);
+                }
             }
         }
     }
 
     /**
-     * @param list<string> $names archive-relative file paths
+     * @return list<string>
+     */
+    private static function listZipEntryNames(\ZipArchive $zip): array
+    {
+        $names = [];
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = str_replace('\\', '/', (string) $zip->getNameIndex($i));
+            $name = ltrim($name, '/');
+            if ($name !== '' && !str_ends_with($name, '/')) {
+                $names[] = $name;
+            }
+        }
+        return $names;
+    }
+
+    /**
+     * @param list<string> $names
      */
     private static function detectPagesRootFromNames(array $names): ?string
     {

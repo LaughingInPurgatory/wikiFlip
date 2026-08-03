@@ -13,7 +13,7 @@ It includes:
 - Newest-created-first page ordering, with optional manual ordering
 - Expandable and collapsible category navigation
 - Site branding (title, logo, custom CSS) from the admin area
-- Full content backup: export/import pages, media, and branding as a `.tar.gz` tarball
+- Full content backup: export/import pages, media, and branding as a ZIP archive
 - A dark indigo interface for both the public site and the admin area
 - A ready-to-run Docker image published to GitHub Container Registry
 

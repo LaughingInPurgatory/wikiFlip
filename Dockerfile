@@ -1,11 +1,11 @@
 # WikiFlip — Apache + PHP webserver container
 FROM php:8.3-apache-bookworm
 
-# Enable rewrite, compression, expires; curl for healthchecks
+# Enable rewrite, compression, expires; curl for healthchecks; zip for content backup
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl libzip-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && docker-php-ext-install -j$(nproc) opcache \
+    && docker-php-ext-install -j$(nproc) opcache zip \
     && a2enmod rewrite headers deflate expires \
     && sed -i 's/AllowOverride None/AllowOverride All/g' /etc/apache2/apache2.conf
 

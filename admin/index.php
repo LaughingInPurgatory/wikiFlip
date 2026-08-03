@@ -8,6 +8,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/core/bootstrap.php';
 
 use WikiApp\Core\Auth;
+use WikiApp\Core\ContentBackup;
 use WikiApp\Core\DatabaseManager;
 use WikiApp\Core\SiteSettings;
 use function WikiApp\Core\e;
@@ -24,18 +25,22 @@ $pageTitle = 'Admin';
 $flash = '';
 $flashOk = true;
 
-/** Active tab: pages | branding */
+/** Active tab: pages | branding | backup */
 $tab = (string) ($_GET['tab'] ?? $_POST['tab'] ?? 'pages');
-if ($tab !== 'branding') {
+if (!in_array($tab, ['pages', 'branding', 'backup'], true)) {
     $tab = 'pages';
 }
 
 /**
- * Redirect back to admin with a tab (and optional flash via query is avoided — flash stays in-request only for branding).
+ * Redirect back to admin with a tab (flash for branding/backup stays in-request only).
  */
 function admin_redirect(string $tab): never
 {
-    $q = $tab === 'branding' ? '?tab=branding' : '';
+    $q = match ($tab) {
+        'branding' => '?tab=branding',
+        'backup' => '?tab=backup',
+        default => '',
+    };
     header('Location: ' . url('admin/' . $q));
     exit;
 }
@@ -76,6 +81,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         admin_redirect('pages');
+    }
+
+    if ($action === 'import_backup') {
+        $tab = 'backup';
+        $mode = (string) ($_POST['import_mode'] ?? 'replace');
+        $mode = $mode === 'merge' ? 'merge' : 'replace';
+
+        if (!ContentBackup::isAvailable()) {
+            $flash = 'ZIP support is not available on this server (need PHP ZipArchive).';
+            $flashOk = false;
+        } elseif (empty($_FILES['backup_zip']['tmp_name']) || !is_uploaded_file((string) $_FILES['backup_zip']['tmp_name'])) {
+            $err = (int) ($_FILES['backup_zip']['error'] ?? UPLOAD_ERR_NO_FILE);
+            $flash = match ($err) {
+                UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'Upload too large (max ~100 MB for full-site backups).',
+                UPLOAD_ERR_NO_FILE => 'Choose a .zip backup file to import.',
+                default => 'Upload failed (error code ' . $err . ').',
+            };
+            $flashOk = false;
+        } else {
+            $tmp = (string) $_FILES['backup_zip']['tmp_name'];
+            $name = (string) ($_FILES['backup_zip']['name'] ?? '');
+            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            if ($ext !== 'zip') {
+                $flash = 'Please upload a .zip file exported from WikiFlip.';
+                $flashOk = false;
+            } else {
+                $result = ContentBackup::importFromZipFile($tmp, $mode);
+                $flash = $result['message'];
+                $flashOk = (bool) $result['ok'];
+            }
+        }
     }
 
     if ($action === 'save_branding') {
@@ -224,13 +260,82 @@ require __DIR__ . '/../src/includes/header.php';
            id="tab-branding">
             Branding &amp; CSS
         </a>
+        <a role="tab"
+           class="admin-tab<?= $tab === 'backup' ? ' is-active' : '' ?>"
+           href="<?= e(url('admin/?tab=backup')) ?>"
+           aria-selected="<?= $tab === 'backup' ? 'true' : 'false' ?>"
+           id="tab-backup">
+            Backup
+        </a>
     </nav>
 
     <?php if ($flash !== ''): ?>
         <div class="save-status <?= $flashOk ? 'is-success' : 'is-error' ?>" role="status"><?= e($flash) ?></div>
     <?php endif; ?>
 
-    <?php if ($tab === 'branding'): ?>
+    <?php if ($tab === 'backup'): ?>
+        <div class="admin-tab-panel" role="tabpanel" aria-labelledby="tab-backup" id="panel-backup">
+            <?php if (!ContentBackup::isAvailable()): ?>
+                <div class="save-status is-error" role="alert">
+                    PHP ZipArchive is not available — export/import is disabled on this server.
+                </div>
+            <?php endif; ?>
+
+            <h3 class="admin-section-title">Export</h3>
+            <p class="hint admin-hint">
+                Download a ZIP of the entire content volume: all pages, nested categories, media files,
+                sidebar order, and branding (logo, title, custom CSS under <code>pages/.site</code>).
+            </p>
+            <form method="post" action="<?= e(url('admin/export.php')) ?>" class="backup-export-form">
+                <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" <?= ContentBackup::isAvailable() ? '' : 'disabled' ?>>
+                        Download backup ZIP
+                    </button>
+                </div>
+            </form>
+
+            <h3 class="admin-section-title">Import</h3>
+            <p class="hint admin-hint">
+                Restore from a WikiFlip backup ZIP (or a ZIP whose root is a <code>pages/</code> tree).
+                <strong>Replace</strong> wipes current content first; <strong>Merge</strong> overwrites matching paths and keeps the rest.
+                Max size ~100&nbsp;MB.
+            </p>
+            <form method="post" enctype="multipart/form-data" class="backup-import-form">
+                <input type="hidden" name="action" value="import_backup">
+                <input type="hidden" name="tab" value="backup">
+                <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
+
+                <div class="form-group">
+                    <label for="backup_zip">Backup file (.zip)</label>
+                    <input type="file" id="backup_zip" name="backup_zip" accept=".zip,application/zip"
+                           <?= ContentBackup::isAvailable() ? 'required' : 'disabled' ?>>
+                </div>
+
+                <div class="form-group">
+                    <label>Import mode</label>
+                    <div class="radio-stack">
+                        <label class="checkbox-inline">
+                            <input type="radio" name="import_mode" value="replace" checked>
+                            Replace all content (recommended for full restore)
+                        </label>
+                        <label class="checkbox-inline">
+                            <input type="radio" name="import_mode" value="merge">
+                            Merge into existing content
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary"
+                            <?= ContentBackup::isAvailable() ? '' : 'disabled' ?>
+                            onclick="return confirm('Import will change live wiki content. Continue?');">
+                        Import backup
+                    </button>
+                </div>
+            </form>
+        </div>
+    <?php elseif ($tab === 'branding'): ?>
         <div class="admin-tab-panel" role="tabpanel" aria-labelledby="tab-branding" id="panel-branding">
             <form method="post" enctype="multipart/form-data" class="branding-form">
                 <input type="hidden" name="action" value="save_branding">

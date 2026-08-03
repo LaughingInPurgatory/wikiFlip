@@ -28,6 +28,12 @@ final class SiteSettings
         return rtrim(DatabaseManager::getPagesDir(), '/\\') . '/' . self::DIR_NAME;
     }
 
+    /** Drop cached branding after import/replace. */
+    public static function clearCache(): void
+    {
+        self::$cache = null;
+    }
+
     /**
      * @return array{site_title: string, logo_file: string|null}
      */

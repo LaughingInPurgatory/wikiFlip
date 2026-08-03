@@ -1110,6 +1110,18 @@ textarea.css-editor:focus {
   vertical-align: middle;
 }
 
+.radio-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.25rem;
+}
+
+.backup-export-form .form-actions,
+.backup-import-form .form-actions {
+  margin-top: 0.75rem;
+}
+
 /* While an AJAX reorder is in flight */
 #adminPageTree.is-reordering {
   opacity: 0.85;

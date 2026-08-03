@@ -13,6 +13,7 @@ define('WIKIFLIP_ROOT', dirname(__DIR__, 2));
 require_once __DIR__ . '/markdown.php';
 require_once __DIR__ . '/db_manager.php';
 require_once __DIR__ . '/site_settings.php';
+require_once __DIR__ . '/content_backup.php';
 require_once __DIR__ . '/auth.php';
 
 /**

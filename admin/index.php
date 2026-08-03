@@ -283,14 +283,16 @@ require __DIR__ . '/../src/includes/header.php';
 
             <h3 class="admin-section-title">Export</h3>
             <p class="hint admin-hint">
-                Download a ZIP of the entire content volume: all pages, nested categories, media files,
-                sidebar order, and branding (logo, title, custom CSS under <code>pages/.site</code>).
+                Download a <strong>.zip file</strong> of the entire content volume: all pages, nested categories,
+                media files, sidebar order, and branding (logo, title, custom CSS under <code>pages/.site</code>).
+                Your browser should save something like <code>wikiflip-backup-YYYYMMDD-HHMMSS.zip</code>
+                (not an unpacked folder).
             </p>
             <form method="post" action="<?= e(url('admin/export.php')) ?>" class="backup-export-form">
                 <input type="hidden" name="csrf_token" value="<?= e(Auth::csrfToken()) ?>">
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary" <?= ContentBackup::isAvailable() ? '' : 'disabled' ?>>
-                        Download backup ZIP
+                        Download backup .zip
                     </button>
                 </div>
             </form>

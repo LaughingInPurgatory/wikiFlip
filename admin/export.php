@@ -1,9 +1,19 @@
 <?php
 /**
  * Download a ZIP of all wiki content (pages, media, order, branding).
+ *
+ * Binary-safe: disables zlib/mod_deflate compression so the file stays a real .zip
+ * (compressed bodies are often saved/auto-expanded as folders by browsers/OS).
  */
 
 declare(strict_types=1);
+
+// Must run before any output or bootstrap side-effects that buffer
+@ini_set('zlib.output_compression', '0');
+if (function_exists('apache_setenv')) {
+    @apache_setenv('no-gzip', '1');
+}
+@ini_set('output_buffering', '0');
 
 require_once __DIR__ . '/../src/core/bootstrap.php';
 
@@ -39,36 +49,69 @@ try {
 }
 
 $filename = ContentBackup::downloadFilename();
+// Always force .zip extension
+if (!str_ends_with(strtolower($filename), '.zip')) {
+    $filename .= '.zip';
+}
+
 $size = filesize($zipPath);
-if ($size === false) {
+if ($size === false || $size < 22) {
     @unlink($zipPath);
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
-    echo 'Export file disappeared before download.';
+    echo 'Export produced an empty or invalid ZIP.';
     exit;
 }
 
-// Clear any prior output so the file is clean
-while (ob_get_level() > 0) {
-    ob_end_clean();
-}
-
-header('Content-Type: application/zip');
-header('Content-Length: ' . (string) $size);
-header('Content-Disposition: attachment; filename="' . $filename . '"');
-header('Cache-Control: no-store, no-cache, must-revalidate');
-header('Pragma: no-cache');
-header('X-Content-Type-Options: nosniff');
-
-$fp = fopen($zipPath, 'rb');
-if ($fp === false) {
+// Verify local file is a real ZIP (PK signature)
+$fh = fopen($zipPath, 'rb');
+if ($fh === false) {
     @unlink($zipPath);
     http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
     echo 'Could not read export file.';
     exit;
 }
+$magic = fread($fh, 4);
+if ($magic === false || !str_starts_with($magic, "PK")) {
+    fclose($fh);
+    @unlink($zipPath);
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'Export file is not a valid ZIP archive.';
+    exit;
+}
+rewind($fh);
 
-fpassthru($fp);
-fclose($fp);
+// Drop any buffers so the raw ZIP bytes are not re-compressed/mangled
+while (ob_get_level() > 0) {
+    ob_end_clean();
+}
+@ini_set('zlib.output_compression', '0');
+
+// Force a saved .zip file (not an auto-expanded folder):
+// - application/octet-stream avoids Safari/macOS “Open safe files” unpacking
+// - filename / filename* always end in .zip
+// - no Content-Encoding so zlib/mod_deflate cannot rewrite the body
+$safeAscii = preg_replace('/[^A-Za-z0-9._-]+/', '-', $filename) ?: 'wikiflip-backup.zip';
+if (!str_ends_with(strtolower($safeAscii), '.zip')) {
+    $safeAscii .= '.zip';
+}
+$disposition = 'attachment; filename="' . $safeAscii . '"; filename*=UTF-8\'\'' . rawurlencode($filename);
+
+header('Content-Type: application/octet-stream');
+header('Content-Transfer-Encoding: binary');
+header('Content-Length: ' . (string) $size);
+header('Content-Disposition: ' . $disposition);
+header('Content-Description: File Transfer');
+header('Cache-Control: no-store, no-cache, must-revalidate, private');
+header('Pragma: public');
+header('Expires: 0');
+header('X-Content-Type-Options: nosniff');
+header('X-Accel-Buffering: no');
+
+// Stream binary
+fpassthru($fh);
+fclose($fh);
 @unlink($zipPath);
 exit;

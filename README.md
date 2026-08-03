@@ -1,5 +1,9 @@
 # WikiFlip
 
+> **Archived / superseded.** This project is no longer maintained.
+> Development continues in **[wikiFlipNG](https://github.com/LaughingInPurgatory/wikiFlipNG)**
+> (Node.js + SQLite rewrite). Prefer that repository for new installs and updates.
+
 WikiFlip is a small, file-based wiki for home labs, private networks, and local
 projects. Pages are written in Markdown and stored as ordinary folders, so there
 is no database to install or maintain.
